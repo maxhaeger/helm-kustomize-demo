@@ -4,10 +4,10 @@ data:
     <!DOCTYPE html>
     <html lang="en">
     <head>
-        <title>A simple HTML document</title>
+        <title>A simpleHTML document</title>
     </head>
     <body>
-        <p>This is Deployment One!<p>
+        <p>This is Test Deployment One!<p>
     </body>
     </html>
 kind: ConfigMap
