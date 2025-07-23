@@ -8,10 +8,9 @@ spec:
     server: https://kubernetes.default.svc
   source:
     path: nginx-demo
-    repoURL: https://github.com/maxhaeger/helm-kustomize-demo
-    targetRevision: HEAD
+    repoURL: https://github.com/maxhaeger/helm-kustomize-demo.git
+    targetRevision: master
     directory:
-      recurse: true
   sources: []
   project: default
   syncPolicy:
