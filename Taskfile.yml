@@ -1,0 +1,35 @@
+version: '3'
+
+vars: 
+  ARGOCD_NAMESPACE: argocd
+
+tasks:
+  build:
+    desc: "Create K3D cluster with LoadBalancer port mapping"
+    cmds:
+      - k3d cluster create --api-port 6550 -p "8080:80@loadbalancer" --agents 2
+      - echo "Cluster created successfully"
+
+  deploy:
+    desc: "Deploy nginx-demo and ArgoCD"
+    cmds:
+      - helm install nginx-demo nginx-demo/ --namespace default --create-namespace
+      - 'kubectl create namespace {{.ARGOCD_NAMESPACE}} --dry-run=client -o yaml | kubectl apply -f -'
+      - 'kubectl apply -n {{.ARGOCD_NAMESPACE}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml'
+      - echo "Waiting for ArgoCD deployment to be ready..."
+      - 'kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{.ARGOCD_NAMESPACE}}'
+      - 'kubectl patch svc argocd-server -n {{.ARGOCD_NAMESPACE}} --type=merge --patch="{\"spec\":{\"type\":\"LoadBalancer\"}}"'
+
+  publish:
+    cmds:
+      - 'kubectl port-forward svc/argocd-server -n {{.ARGOCD_NAMESPACE}} 8081:80'
+
+  argocd:
+    cmds: 
+      - 'kubectl apply -f base/argocd-application.yaml'
+
+
+
+  clean:
+    cmds:
+      - k3d cluster delete
