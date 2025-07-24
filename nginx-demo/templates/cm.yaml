@@ -7,7 +7,7 @@ data:
         <title>A simpleHTML document</title>
     </head>
     <body>
-        <p>This is Prod Deployment One!<p>
+        <p>This is a Test Deployment!<p>
     </body>
     </html>
 kind: ConfigMap
