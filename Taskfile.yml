@@ -24,10 +24,13 @@ tasks:
     cmds:
       - 'kubectl port-forward svc/argocd-server -n {{.ARGOCD_NAMESPACE}} 8081:80'
 
-  argocd:
+  argo-secret:
     cmds: 
-      - 'kubectl apply -fbase/argocd-application.yaml'
       - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
+
+  argo-create-app:
+    cmds:
+      - 'kubectl apply -f base/argocd-application.yaml'
 
   clean:
     cmds:
