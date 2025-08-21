@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config1
+  namespace: default
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <title>Staging Environment</title>
+    </head>
+    <body>
+        <p>This is a STAGING Deployment!</p>
+    </body>
+    </html>
