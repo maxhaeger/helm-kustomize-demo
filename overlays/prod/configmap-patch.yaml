@@ -2,15 +2,20 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: my-config1
-  namespace: default
+  namespace: prod
 data:
   index.html: |
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <title>Production Environment</title>
+        <style>
+          body { background-color: #ffe6e6; color: #8b0000; font-family: Arial; text-align: center; padding: 50px; }
+        </style>
     </head>
     <body>
-        <p>This is a PROD Deployment!</p>
+        <h1> Production Environment</h1>
+        <p>This is a <strong>PRODUCTION</strong> Deployment!</p>
+        <p>Namespace: prod</p>
     </body>
     </html>

@@ -2,15 +2,20 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: my-config1
-  namespace: default
+  namespace: stage
 data:
   index.html: |
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <title>Staging Environment</title>
+        <style>
+          body { background-color: #fff4e6; color: #b8860b; font-family: Arial; text-align: center; padding: 50px; }
+        </style>
     </head>
     <body>
-        <p>This is a STAGING Deployment!</p>
+        <h1>Staging Environment</h1>
+        <p>This is a <strong>STAGING</strong> Deployment!</p>
+        <p>Namespace: stage</p>
     </body>
     </html>

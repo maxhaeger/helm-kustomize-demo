@@ -1,6 +1,6 @@
-version: '3'
+version: "3"
 
-vars: 
+vars:
   ARGOCD_NAMESPACE: argocd
 
 tasks:
@@ -11,27 +11,165 @@ tasks:
       - echo "Cluster created successfully"
 
   deploy:
-    desc: "Deploy nginx-demo and ArgoCD"
+    desc: "Deploy nginx-demo with Helm only"
     cmds:
       - helm install nginx-demo nginx-demo/ --namespace default --create-namespace
-      - 'kubectl create namespace {{.ARGOCD_NAMESPACE}} --dry-run=client -o yaml | kubectl apply -f -'
-      - 'kubectl apply -n {{.ARGOCD_NAMESPACE}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml'
+      - echo "Base deployment completed"
+
+  deploy-dev:
+    desc: "Deploy to Development environment (Helm Release + Kustomize)"
+    cmds:
+      - echo "Deploying nginx-demo-dev to DEV environment..."
+      - helm upgrade --install nginx-demo-dev nginx-demo/
+        --namespace dev
+        --create-namespace
+        --post-renderer ./kustomize-post-renderer.sh
+        --post-renderer-args overlays/dev
+      - echo "✅ DEV deployment completed - Release: nginx-demo-dev"
+
+  deploy-stage:
+    desc: "Deploy to Staging environment (Helm Release + Kustomize)"
+    cmds:
+      - echo "Deploying nginx-demo-stage to STAGE environment..."
+      - helm upgrade --install nginx-demo-stage nginx-demo/
+        --namespace stage
+        --create-namespace
+        --post-renderer ./kustomize-post-renderer.sh
+        --post-renderer-args overlays/stage
+
+  deploy-prod:
+    desc: "Deploy to Production environment (Helm Release + Kustomize)"
+    cmds:
+      - echo "Deploying nginx-demo-prod to PROD environment..."
+      - helm upgrade --install nginx-demo-prod nginx-demo/
+        --namespace prod
+        --create-namespace
+        --post-renderer ./kustomize-post-renderer.sh
+        --post-renderer-args overlays/prod
+
+  # Helm Release Management
+  list-releases:
+    desc: "List all Helm releases across environments"
+    cmds:
+      - echo "=== DEV Releases ==="
+      - helm list -n dev || echo "No releases in dev namespace"
+      - echo "=== STAGE Releases ==="
+      - helm list -n stage || echo "No releases in stage namespace"
+      - echo "=== PROD Releases ==="
+      - helm list -n prod || echo "No releases in prod namespace"
+
+  rollback-dev:
+    desc: "Rollback DEV environment to previous release"
+    cmds:
+      - helm rollback nginx-demo-dev -n dev
+      - echo "✅ DEV rolled back to previous version"
+
+  rollback-stage:
+    desc: "Rollback STAGE environment to previous release"
+    cmds:
+      - helm rollback nginx-demo-stage -n stage
+      - echo "✅ STAGE rolled back to previous version"
+
+  rollback-prod:
+    desc: "Rollback PROD environment to previous release"
+    cmds:
+      - helm rollback nginx-demo-prod -n prod
+      - echo "✅ PROD rolled back to previous version"
+
+  history-dev:
+    desc: "Show DEV release history"
+    cmds:
+      - helm history nginx-demo-dev -n dev
+
+  history-stage:
+    desc: "Show STAGE release history"
+    cmds:
+      - helm history nginx-demo-stage -n stage
+
+  history-prod:
+    desc: "Show PROD release history"
+    cmds:
+      - helm history nginx-demo-prod -n prod
+
+  # Testing and Verification per Environment
+  test-dev:
+    desc: "Test DEV deployment"
+    cmds:
+      - echo "=== DEV Environment Status ==="
+      - kubectl get pods -l app=nginx -n dev
+      - kubectl get svc nginx-service -n dev
+      - kubectl describe configmap my-config1 -n dev
+
+  test-stage:
+    desc: "Test STAGE deployment"
+    cmds:
+      - echo "=== STAGE Environment Status ==="
+      - kubectl get pods -l app=nginx -n stage
+      - kubectl get svc nginx-service -n stage
+      - kubectl describe configmap my-config1 -n stage
+
+  test-prod:
+    desc: "Test PROD deployment"
+    cmds:
+      - echo "=== PROD Environment Status ==="
+      - kubectl get pods -l app=nginx -n prod
+      - kubectl get svc nginx-service -n prod
+      - kubectl describe configmap my-config1 -n prod
+
+  port-forward-dev:
+    desc: "Port-forward DEV application"
+    cmds:
+      - echo "DEV Access at http://localhost:8080"
+      - kubectl port-forward svc/nginx-service 8080:80 -n dev
+
+  port-forward-stage:
+    desc: "Port-forward STAGE application"
+    cmds:
+      - echo "STAGE Access at http://localhost:8081"
+      - kubectl port-forward svc/nginx-service 8081:80 -n stage
+
+  port-forward-prod:
+    desc: "Port-forward PROD application"
+    cmds:
+      - echo "PROD Access at http://localhost:8082"
+      - kubectl port-forward svc/nginx-service 8082:80 -n prod
+
+  # ArgoCD Setup (original)
+  deploy-argocd:
+    desc: "Deploy ArgoCD"
+    cmds:
+      - "kubectl create namespace {{.ARGOCD_NAMESPACE}} --dry-run=client -o yaml | kubectl apply -f -"
+      - "kubectl apply -n {{.ARGOCD_NAMESPACE}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
       - echo "Waiting for ArgoCD deployment to be ready..."
-      - 'kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{.ARGOCD_NAMESPACE}}'
+      - "kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{.ARGOCD_NAMESPACE}}"
       - 'kubectl patch svc argocd-server -n {{.ARGOCD_NAMESPACE}} --type=merge --patch="{\"spec\":{\"type\":\"LoadBalancer\"}}"'
 
   publish:
+    desc: "Port-forward ArgoCD UI"
     cmds:
-      - 'kubectl port-forward svc/argocd-server -n {{.ARGOCD_NAMESPACE}} 8081:80'
+      - "kubectl port-forward svc/argocd-server -n {{.ARGOCD_NAMESPACE}} 8081:80"
 
   argo-secret:
-    cmds: 
+    desc: "Get ArgoCD admin password"
+    cmds:
       - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
 
   argo-create-app:
+    desc: "Create ArgoCD application"
     cmds:
-      - 'kubectl apply -f base/argocd-application.yaml'
+      - "kubectl apply -f base/argocd-application.yaml"
 
   clean:
+    desc: "Clean up everything"
     cmds:
       - k3d cluster delete
+      - rm -rf tmp/
+
+  simulate-upgrade:
+    desc: "Simulate application upgrade across environments"
+    cmds:
+      - echo "🔄 Simulating version upgrade..."
+      - helm upgrade nginx-demo-dev nginx-demo/ --namespace dev --set deployment.replicaCount=5 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/dev
+      - helm upgrade nginx-demo-stage nginx-demo/ --namespace stage --set deployment.replicaCount=4 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/stage
+      - helm upgrade nginx-demo-prod nginx-demo/ --namespace prod --set deployment.replicaCount=6 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/prod
+      - echo "✅ Upgrade completed - check with 'task list-releases'"
