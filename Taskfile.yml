@@ -19,7 +19,6 @@ tasks:
   deploy-dev:
     desc: "Deploy to Development environment (Helm Release + Kustomize)"
     cmds:
-      - echo "Deploying nginx-demo-dev to DEV environment..."
       - helm upgrade --install nginx-demo-dev nginx-demo/
         --namespace dev
         --create-namespace
@@ -29,7 +28,6 @@ tasks:
   deploy-stage:
     desc: "Deploy to Staging environment (Helm Release + Kustomize)"
     cmds:
-      - echo "Deploying nginx-demo-stage to STAGE environment..."
       - helm upgrade --install nginx-demo-stage nginx-demo/
         --namespace stage
         --create-namespace
@@ -39,7 +37,6 @@ tasks:
   deploy-prod:
     desc: "Deploy to Production environment (Helm Release + Kustomize)"
     cmds:
-      - echo "Deploying nginx-demo-prod to PROD environment..."
       - helm upgrade --install nginx-demo-prod nginx-demo/
         --namespace prod
         --create-namespace
@@ -167,7 +164,6 @@ tasks:
   simulate-upgrade:
     desc: "Simulate application upgrade across environments"
     cmds:
-      - echo "🔄 Simulating version upgrade..."
       - helm upgrade nginx-demo-dev nginx-demo/ --namespace dev --set deployment.replicaCount=5 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/dev
       - helm upgrade nginx-demo-stage nginx-demo/ --namespace stage --set deployment.replicaCount=4 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/stage
       - helm upgrade nginx-demo-prod nginx-demo/ --namespace prod --set deployment.replicaCount=6 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/prod

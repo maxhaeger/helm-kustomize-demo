@@ -5,8 +5,8 @@ metadata:
   namespace: argocd
 spec:
   destination:
-    namespace: default
-    server: https://kubernetes.default.svc
+    namespace: {{ .Release.Namespace }}
+    server: https://kubernetes.{{ .Release.Namespace }}.svc
   source:
     path: nginx-demo
     repoURL: https://github.com/maxhaeger/helm-kustomize-demo.git

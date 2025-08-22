@@ -1,27 +1,28 @@
 #!/bin/bash
 
-# Kustomize Post-Renderer für Helm
-# Usage: helm install/upgrade --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/dev
 
 set -e
 
-# Overlay-Pfad aus Argumenten
 OVERLAY_PATH=${1:-overlays/dev}
+CURRENT_DIR=$(pwd)
 
-# Temporäres Verzeichnis erstellen
+# Temp Verzeichnis erstlelen
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-# Helm Output in temporäre Datei schreiben
+# Helm Output sichern
 cat > "$TEMP_DIR/all.yaml"
 
-# Kustomization.yaml für das Overlay erstellen, falls nicht vorhanden
-if [ ! -f "$OVERLAY_PATH/kustomization.yaml" ]; then
-    echo "Error: $OVERLAY_PATH/kustomization.yaml not found"
+# Prüfen ob Overlay existiert
+if [ ! -d "$CURRENT_DIR/$OVERLAY_PATH" ]; then
+    echo "Error: $CURRENT_DIR/$OVERLAY_PATH not found"
     exit 1
 fi
 
-# Base kustomization.yaml erstellen, die auf Helm Output verweist
+# Zur Overlay-Directory wechseln und von dort aus builden
+cd "$CURRENT_DIR/$OVERLAY_PATH"
+
+# Temporäre kustomization.yaml für diesen Build erstellen
 cat > "$TEMP_DIR/kustomization.yaml" << EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -29,10 +30,16 @@ kind: Kustomization
 resources:
 - all.yaml
 
-patchesStrategicMerge:
-$(cd "$OVERLAY_PATH" && find . -name "*.yaml" -not -name "kustomization.yaml" | sed 's|^|- ../'"$OVERLAY_PATH"'/|')
+patches:
+- path: configmap-patch.yaml
+  target:
+    kind: ConfigMap
+    name: my-config1
 EOF
 
-# Kustomize build ausführen
+# Patch-Datei in temp Verzeichnis kopieren
+cp configmap-patch.yaml "$TEMP_DIR/"
+
+# Build ausführen
 cd "$TEMP_DIR"
 kustomize build .
