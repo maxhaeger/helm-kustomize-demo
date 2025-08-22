@@ -25,7 +25,6 @@ tasks:
         --create-namespace
         --post-renderer ./kustomize-post-renderer.sh
         --post-renderer-args overlays/dev
-      - echo "✅ DEV deployment completed - Release: nginx-demo-dev"
 
   deploy-stage:
     desc: "Deploy to Staging environment (Helm Release + Kustomize)"

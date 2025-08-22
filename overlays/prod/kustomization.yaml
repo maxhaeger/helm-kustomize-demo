@@ -1,5 +1,18 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-patchesStrategicMerge:
-- configmap-patch.yaml
+namespace: prod
+
+patches:
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: my-config1
+
+replicas:
+  - name: nginx-deployment
+    count: 5
+
+commonLabels:
+  environment: production
+  tier: frontend

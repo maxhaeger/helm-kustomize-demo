@@ -7,3 +7,36 @@ service:
   targetPort: 80
   type: ClusterIP
 
+# ConfigMap Daten für die Standard-HTML-Seite
+configMap:
+  data:
+    index:
+      html: |
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <title>Default Environment</title>
+            <style>
+              body { background-color: #f0f0f0; color: #333; font-family: Arial; text-align: center; padding: 50px; }
+            </style>
+        </head>
+        <body>
+            <h1>Default Environment</h1>
+            <p>This is the <strong>DEFAULT</strong> Deployment!</p>
+            <p>Namespace: default</p>
+            <p>Managed by Helm + Kustomize</p>
+        </body>
+        </html>
+
+# Ingress Konfiguration
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  hosts:
+    - host: nginx-demo.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

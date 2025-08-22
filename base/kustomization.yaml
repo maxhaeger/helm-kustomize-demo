@@ -1,2 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+# Basis-Ressourcen (falls Sie pure Kustomize ohne Helm verwenden wollen)
+# resources:
+# - ../nginx-demo/templates/deployment.yaml
+# - ../nginx-demo/templates/service.yaml
+# - ../nginx-demo/templates/ingress.yaml
+# - ../nginx-demo/templates/cm.yaml
+
+# Gemeinsame Labels für alle Ressourcen
+commonLabels:
+  app.kubernetes.io/name: nginx-demo
+  app.kubernetes.io/managed-by: kustomize
+
+# Namespace für alle Ressourcen
+# namespace: default
+
+# Gemeinsame Annotations
+commonAnnotations:
+  app.kubernetes.io/version: "1.0.0"
