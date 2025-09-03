@@ -20,13 +20,14 @@ tasks:
       - "kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{.ARGOCD_NAMESPACE}}"
       - 'kubectl patch svc argocd-server -n {{.ARGOCD_NAMESPACE}} --type=merge --patch="{\"spec\":{\"type\":\"LoadBalancer\"}}"'
 
-  # Standard Deployments mit Kustomize (OHNE ArgoCD App)
+  # Direkte Deployments (OHNE ArgoCD) mit Kustomize
   deploy-dev:
     desc: "Deploy to Development environment (Helm + Kustomize)"
     cmds:
       - helm upgrade --install nginx-demo-dev nginx-demo/
         --namespace dev
         --create-namespace
+        --set argocd.enabled=false
         --post-renderer ./kustomize-post-renderer.sh
         --post-renderer-args overlays/dev
 
@@ -36,6 +37,7 @@ tasks:
       - helm upgrade --install nginx-demo-stage nginx-demo/
         --namespace stage
         --create-namespace
+        --set argocd.enabled=false
         --post-renderer ./kustomize-post-renderer.sh
         --post-renderer-args overlays/stage
 
@@ -45,10 +47,11 @@ tasks:
       - helm upgrade --install nginx-demo-prod nginx-demo/
         --namespace prod
         --create-namespace
+        --set argocd.enabled=false
         --post-renderer ./kustomize-post-renderer.sh
         --post-renderer-args overlays/prod
 
-  # ArgoCD App Deployments (eine App pro Environment)
+  # ArgoCD Application Deployments (NUR Applications, keine Workloads)
   deploy-argo-dev:
     desc: "Deploy Development ArgoCD Application"
     cmds:
@@ -56,10 +59,11 @@ tasks:
         --namespace argocd
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-dev
+        --set argocd.source.repoURL=https://github.com/maxhaeger/helm-kustomize-demo.git
         --set argocd.source.targetRevision=master
+        --set argocd.destination.namespace=dev
         --set argocd.syncPolicy.automated.prune=true
         --set argocd.syncPolicy.automated.selfHeal=true
-        --set argocd.destination.namespace=dev
       - echo "✅ ArgoCD Application for DEV created"
 
   deploy-argo-stage:
@@ -69,10 +73,11 @@ tasks:
         --namespace argocd
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-stage
+        --set argocd.source.repoURL=https://github.com/maxhaeger/helm-kustomize-demo.git
         --set argocd.source.targetRevision=master
+        --set argocd.destination.namespace=stage
         --set argocd.syncPolicy.automated.prune=false
         --set argocd.syncPolicy.automated.selfHeal=true
-        --set argocd.destination.namespace=stage
       - echo "✅ ArgoCD Application for STAGE created"
 
   deploy-argo-prod:
@@ -82,33 +87,14 @@ tasks:
         --namespace argocd
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-prod
+        --set argocd.source.repoURL=https://github.com/maxhaeger/helm-kustomize-demo.git
         --set argocd.source.targetRevision=stable
+        --set argocd.destination.namespace=prod
         --set argocd.syncPolicy.automated.prune=false
         --set argocd.syncPolicy.automated.selfHeal=false
-        --set argocd.destination.namespace=prod
-        --set argocd.project=production
       - echo "✅ ArgoCD Application for PROD created"
 
-  # Kombinierte Deployments (Kustomize + ArgoCD App)
-  deploy-full-dev:
-    desc: "Deploy DEV: Application + ArgoCD App"
-    cmds:
-      - task: deploy-dev
-      - task: deploy-argo-dev
-
-  deploy-full-stage:
-    desc: "Deploy STAGE: Application + ArgoCD App"
-    cmds:
-      - task: deploy-stage
-      - task: deploy-argo-stage
-
-  deploy-full-prod:
-    desc: "Deploy PROD: Application + ArgoCD App"
-    cmds:
-      - task: deploy-prod
-      - task: deploy-argo-prod
-
-  # Alle Environments gleichzeitig
+  # GitOps Setup - NUR ArgoCD Applications erstellen
   deploy-all-argo-apps:
     desc: "Deploy ArgoCD Applications for all environments"
     cmds:
@@ -122,56 +108,14 @@ tasks:
     cmds:
       - echo "=== ArgoCD Applications ==="
       - kubectl get applications -n argocd -o wide
-      - echo ""
-      - echo "=== Application Details ==="
-      - kubectl get application nginx-demo-dev -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null && echo " - DEV Sync Status" || echo "DEV App not found"
-      - kubectl get application nginx-demo-stage -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null && echo " - STAGE Sync Status" || echo "STAGE App not found"
-      - kubectl get application nginx-demo-prod -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null && echo " - PROD Sync Status" || echo "PROD App not found"
 
   # Sync Operations
-  sync-argo-dev:
-    desc: "Manually sync DEV ArgoCD application"
+  sync-all:
+    desc: "Sync all ArgoCD applications"
     cmds:
-      - kubectl patch application nginx-demo-dev -n argocd --type=merge -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
-
-  sync-argo-stage:
-    desc: "Manually sync STAGE ArgoCD application"
-    cmds:
-      - kubectl patch application nginx-demo-stage -n argocd --type=merge -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
-
-  sync-argo-prod:
-    desc: "Manually sync PROD ArgoCD application"
-    cmds:
-      - kubectl patch application nginx-demo-prod -n argocd --type=merge -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
-
-  # Cleanup einzelner Apps
-  delete-argo-dev:
-    desc: "Delete DEV ArgoCD application"
-    cmds:
-      - helm uninstall nginx-demo-dev-argo -n argocd
-      - kubectl delete application nginx-demo-dev -n argocd --ignore-not-found=true
-
-  delete-argo-stage:
-    desc: "Delete STAGE ArgoCD application"
-    cmds:
-      - helm uninstall nginx-demo-stage-argo -n argocd
-      - kubectl delete application nginx-demo-stage -n argocd --ignore-not-found=true
-
-  delete-argo-prod:
-    desc: "Delete PROD ArgoCD application"
-    cmds:
-      - helm uninstall nginx-demo-prod-argo -n argocd
-      - kubectl delete application nginx-demo-prod -n argocd --ignore-not-found=true
-
-  # Debug
-  debug-argo-template:
-    desc: "Debug ArgoCD template for DEV"
-    cmds:
-      - helm template nginx-demo-dev-argo nginx-demo/
-        --namespace argocd
-        --set argocd.enabled=true
-        --set argocd.appName=nginx-demo-dev
-        --set argocd.destination.namespace=dev
+      - kubectl patch application nginx-demo-dev -n argocd --type=merge -p='{"operation":{"sync":{}}}'
+      - kubectl patch application nginx-demo-stage -n argocd --type=merge -p='{"operation":{"sync":{}}}'
+      - kubectl patch application nginx-demo-prod -n argocd --type=merge -p='{"operation":{"sync":{}}}'
 
   # Utilities
   publish:
@@ -190,7 +134,16 @@ tasks:
       - k3d cluster delete
       - rm -rf tmp/
 
-  # Kompletter GitOps Workflow
+  # Cleanup für aktuelles Problem
+  cleanup-argo-conflicts:
+    desc: "Clean up conflicting Helm releases"
+    cmds:
+      - helm uninstall nginx-demo-dev-argo -n argocd --ignore-not-found
+      - helm uninstall nginx-demo-stage-argo -n argocd --ignore-not-found
+      - helm uninstall nginx-demo-prod-argo -n argocd --ignore-not-found
+      - kubectl delete applications --all -n argocd --ignore-not-found
+
+  # Kompletter GitOps Workflow (KORRIGIERT)
   setup-gitops:
     desc: "Complete GitOps setup"
     cmds:
@@ -201,4 +154,4 @@ tasks:
       - task: deploy-all-argo-apps
       - echo ""
       - echo "✅ GitOps Setup Complete!"
-      - echo "📋 Next steps:"
+      - echo "📋 ArgoCD Applications created. They will sync the actual workloads."

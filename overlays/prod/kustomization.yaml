@@ -12,7 +12,3 @@ patches:
 replicas:
   - name: nginx-deployment
     count: 5
-
-commonLabels:
-  environment: production
-  tier: frontend
