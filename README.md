@@ -2,7 +2,7 @@
 
 ## Architektur
 
-#####  Docker Grundlagen
+##### Docker Grundlagen
 
 **Das Problem ohne Container:** "Auf meinem Rechner läuft's" - klassisches Entwicklerproblem. Unterschiedliche Betriebssysteme, Library-Versionen, Konfigurationen führen zu inkonsistentem Verhalten.
 
@@ -41,36 +41,41 @@
 
 ```yaml
 spec:
-  replicas: 3  # Kubernetes sorgt dafür, dass immer 3 Pods laufen
+  replicas: 3 # Kubernetes sorgt dafür, dass immer 3 Pods laufen
 ```
 
 **Service:** Stable Netzwerk-Endpoint für Pods
+
 - Pods kommen und gehen, Services bleiben
 - Load-Balancing zwischen Pod-Instanzen
 - DNS-Namen für Service Discovery
 
 **Namespace:** Logische Cluster-Trennung
+
 - Isolation verschiedener Anwendungen/Teams
 - Resource-Quotas und RBAC pro Namespace
 
 **Das Kubernetes Control Plane:**
+
 - **API Server:** Zentrale REST-API, alle Anfragen laufen hier durch
 - **etcd:** Distributed Key-Value Store für Cluster-State
 - **Scheduler:** Entscheidet auf welchen Nodes Pods laufen
 - **Controller Manager:** Überwacht desired vs actual state
 
 **Worker Nodes:**
+
 - **kubelet:** Agent auf jedem Node, startet/stoppt Container
 - **kube-proxy:** Netzwerk-Proxy für Services
 - **Container Runtime:** Docker/containerd zum Container-Management
 
 **Beispiel aus unserem Setup:**
+
 ```yaml
 # Deployment beschreibt WAS laufen soll
 replicas: 3
 image: nginx:1.14.2
 
-# Service beschreibt WIE darauf zugegriffen wird  
+# Service beschreibt WIE darauf zugegriffen wird
 type: ClusterIP
 port: 80
 
@@ -93,18 +98,20 @@ backend: nginx-service
 - **Skalierung:** Von 1 auf 1000 Instanzen per kubectl-Befehl/k9s/ArgoCD
 - **Self-Healing:** Kaputte Container werden automatisch ersetzt
 - **Rolling Updates:** Neue Versionen ohne Downtime
-- **Resource-Management:** 
+- **Resource-Management:**
 - CPU/RAM-Limits pro Container
 - Container-Orchestrierung und -Management
 - Automatische Skalierung, Health Checks, Service Discovery
 - Deklarative Konfiguration über YAML-Manifeste
 
 **Helm**
+
 - Paketmanager für Kubernetes
 - Template-Engine für wiederverwendbare Deployments
 - Versionierung und Rollback-Funktionalität
 
 **ArgoCD**
+
 - GitOps-Controller für kontinuierliche Synchronisation
 - Überwacht Git-Repository und wendet Änderungen automatisch an
 - Declarative State Management
@@ -267,4 +274,4 @@ kubectl autoscale deployment nginx-deployment --cpu-percent=50 --min=1 --max=10
 task clean
 ```
 
-Entfernt komplette k3d-Cluster-Instanz.
+- Entfernt komplette k3d-Cluster-Instanz.

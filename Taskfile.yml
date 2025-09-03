@@ -88,7 +88,7 @@ tasks:
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-prod
         --set argocd.source.repoURL=https://github.com/maxhaeger/helm-kustomize-demo.git
-        --set argocd.source.targetRevision=stable
+        --set argocd.source.targetRevision=master
         --set argocd.destination.namespace=prod
         --set argocd.syncPolicy.automated.prune=false
         --set argocd.syncPolicy.automated.selfHeal=false
@@ -123,10 +123,11 @@ tasks:
     cmds:
       - "kubectl port-forward svc/argocd-server -n {{.ARGOCD_NAMESPACE}} 8081:80"
 
-  argo-secret:
-    desc: "Get ArgoCD admin password"
+  argo-secret-copy:
+    desc: "Copy ArgoCD admin password to clipboard"
     cmds:
-      - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
+      - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d | pbcopy'
+      - echo "✅ ArgoCD admin password copied to clipboard"
 
   clean:
     desc: "Clean up everything"
