@@ -40,3 +40,43 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+# ArgoCD Configuration - wird per --set aktiviert
+argocd:
+  enabled: false # Default: keine ArgoCD App erstellen
+  namespace: argocd
+  appName: "" # Wird automatisch generiert als: release-name-namespace
+
+  # Source Repository Configuration
+  source:
+    repoURL: https://github.com/maxhaeger/helm-kustomize-demo.git
+    path: nginx-demo
+    targetRevision: HEAD # Wird per environment überschrieben
+
+    # Optional: Helm-spezifische Konfiguration für die ArgoCD App
+    helm:
+      valueFiles:
+        - values.yaml
+      parameters: []
+
+  # Destination (wird automatisch auf Release Namespace gesetzt)
+  destination:
+    server: https://kubernetes.default.svc
+
+  # Project
+  project: default
+
+  # Sync Policy (wird per environment angepasst)
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+      allowEmpty: false
+    syncOptions:
+      - "Validate=true"
+    retry:
+      limit: 5
+      backoff:
+        duration: "5s"
+        factor: 2
+        maxDuration: "3m"

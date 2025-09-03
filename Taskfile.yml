@@ -10,127 +10,7 @@ tasks:
       - k3d cluster create --api-port 6550 -p "8080:80@loadbalancer" --agents 2
       - echo "Cluster created successfully"
 
-  deploy:
-    desc: "Deploy nginx-demo with Helm only"
-    cmds:
-      - helm install nginx-demo nginx-demo/ --namespace default --create-namespace
-      - echo "Base deployment completed"
-
-  deploy-dev:
-    desc: "Deploy to Development environment (Helm Release + Kustomize)"
-    cmds:
-      - helm upgrade --install nginx-demo-dev nginx-demo/
-        --namespace dev
-        --create-namespace
-        --post-renderer ./kustomize-post-renderer.sh
-        --post-renderer-args overlays/dev
-
-  deploy-stage:
-    desc: "Deploy to Staging environment (Helm Release + Kustomize)"
-    cmds:
-      - helm upgrade --install nginx-demo-stage nginx-demo/
-        --namespace stage
-        --create-namespace
-        --post-renderer ./kustomize-post-renderer.sh
-        --post-renderer-args overlays/stage
-
-  deploy-prod:
-    desc: "Deploy to Production environment (Helm Release + Kustomize)"
-    cmds:
-      - helm upgrade --install nginx-demo-prod nginx-demo/
-        --namespace prod
-        --create-namespace
-        --post-renderer ./kustomize-post-renderer.sh
-        --post-renderer-args overlays/prod
-
-  # Helm Release Management
-  list-releases:
-    desc: "List all Helm releases across environments"
-    cmds:
-      - echo "=== DEV Releases ==="
-      - helm list -n dev || echo "No releases in dev namespace"
-      - echo "=== STAGE Releases ==="
-      - helm list -n stage || echo "No releases in stage namespace"
-      - echo "=== PROD Releases ==="
-      - helm list -n prod || echo "No releases in prod namespace"
-
-  rollback-dev:
-    desc: "Rollback DEV environment to previous release"
-    cmds:
-      - helm rollback nginx-demo-dev -n dev
-      - echo "✅ DEV rolled back to previous version"
-
-  rollback-stage:
-    desc: "Rollback STAGE environment to previous release"
-    cmds:
-      - helm rollback nginx-demo-stage -n stage
-      - echo "✅ STAGE rolled back to previous version"
-
-  rollback-prod:
-    desc: "Rollback PROD environment to previous release"
-    cmds:
-      - helm rollback nginx-demo-prod -n prod
-      - echo "✅ PROD rolled back to previous version"
-
-  history-dev:
-    desc: "Show DEV release history"
-    cmds:
-      - helm history nginx-demo-dev -n dev
-
-  history-stage:
-    desc: "Show STAGE release history"
-    cmds:
-      - helm history nginx-demo-stage -n stage
-
-  history-prod:
-    desc: "Show PROD release history"
-    cmds:
-      - helm history nginx-demo-prod -n prod
-
-  # Testing and Verification per Environment
-  test-dev:
-    desc: "Test DEV deployment"
-    cmds:
-      - echo "=== DEV Environment Status ==="
-      - kubectl get pods -l app=nginx -n dev
-      - kubectl get svc nginx-service -n dev
-      - kubectl describe configmap my-config1 -n dev
-
-  test-stage:
-    desc: "Test STAGE deployment"
-    cmds:
-      - echo "=== STAGE Environment Status ==="
-      - kubectl get pods -l app=nginx -n stage
-      - kubectl get svc nginx-service -n stage
-      - kubectl describe configmap my-config1 -n stage
-
-  test-prod:
-    desc: "Test PROD deployment"
-    cmds:
-      - echo "=== PROD Environment Status ==="
-      - kubectl get pods -l app=nginx -n prod
-      - kubectl get svc nginx-service -n prod
-      - kubectl describe configmap my-config1 -n prod
-
-  port-forward-dev:
-    desc: "Port-forward DEV application"
-    cmds:
-      - echo "DEV Access at http://localhost:8080"
-      - kubectl port-forward svc/nginx-service 8080:80 -n dev
-
-  port-forward-stage:
-    desc: "Port-forward STAGE application"
-    cmds:
-      - echo "STAGE Access at http://localhost:8081"
-      - kubectl port-forward svc/nginx-service 8081:80 -n stage
-
-  port-forward-prod:
-    desc: "Port-forward PROD application"
-    cmds:
-      - echo "PROD Access at http://localhost:8082"
-      - kubectl port-forward svc/nginx-service 8082:80 -n prod
-
-  # ArgoCD Setup (original)
+  # ArgoCD Installation
   deploy-argocd:
     desc: "Deploy ArgoCD"
     cmds:
@@ -140,6 +20,160 @@ tasks:
       - "kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{.ARGOCD_NAMESPACE}}"
       - 'kubectl patch svc argocd-server -n {{.ARGOCD_NAMESPACE}} --type=merge --patch="{\"spec\":{\"type\":\"LoadBalancer\"}}"'
 
+  # Standard Deployments mit Kustomize (OHNE ArgoCD App)
+  deploy-dev:
+    desc: "Deploy to Development environment (Helm + Kustomize)"
+    cmds:
+      - helm upgrade --install nginx-demo-dev nginx-demo/
+        --namespace dev
+        --create-namespace
+        --post-renderer ./kustomize-post-renderer.sh
+        --post-renderer-args overlays/dev
+
+  deploy-stage:
+    desc: "Deploy to Staging environment (Helm + Kustomize)"
+    cmds:
+      - helm upgrade --install nginx-demo-stage nginx-demo/
+        --namespace stage
+        --create-namespace
+        --post-renderer ./kustomize-post-renderer.sh
+        --post-renderer-args overlays/stage
+
+  deploy-prod:
+    desc: "Deploy to Production environment (Helm + Kustomize)"
+    cmds:
+      - helm upgrade --install nginx-demo-prod nginx-demo/
+        --namespace prod
+        --create-namespace
+        --post-renderer ./kustomize-post-renderer.sh
+        --post-renderer-args overlays/prod
+
+  # ArgoCD App Deployments (eine App pro Environment)
+  deploy-argo-dev:
+    desc: "Deploy Development ArgoCD Application"
+    cmds:
+      - helm upgrade --install nginx-demo-dev-argo nginx-demo/
+        --namespace argocd
+        --set argocd.enabled=true
+        --set argocd.appName=nginx-demo-dev
+        --set argocd.source.targetRevision=master
+        --set argocd.syncPolicy.automated.prune=true
+        --set argocd.syncPolicy.automated.selfHeal=true
+        --set argocd.destination.namespace=dev
+      - echo "✅ ArgoCD Application for DEV created"
+
+  deploy-argo-stage:
+    desc: "Deploy Staging ArgoCD Application"
+    cmds:
+      - helm upgrade --install nginx-demo-stage-argo nginx-demo/
+        --namespace argocd
+        --set argocd.enabled=true
+        --set argocd.appName=nginx-demo-stage
+        --set argocd.source.targetRevision=master
+        --set argocd.syncPolicy.automated.prune=false
+        --set argocd.syncPolicy.automated.selfHeal=true
+        --set argocd.destination.namespace=stage
+      - echo "✅ ArgoCD Application for STAGE created"
+
+  deploy-argo-prod:
+    desc: "Deploy Production ArgoCD Application"
+    cmds:
+      - helm upgrade --install nginx-demo-prod-argo nginx-demo/
+        --namespace argocd
+        --set argocd.enabled=true
+        --set argocd.appName=nginx-demo-prod
+        --set argocd.source.targetRevision=stable
+        --set argocd.syncPolicy.automated.prune=false
+        --set argocd.syncPolicy.automated.selfHeal=false
+        --set argocd.destination.namespace=prod
+        --set argocd.project=production
+      - echo "✅ ArgoCD Application for PROD created"
+
+  # Kombinierte Deployments (Kustomize + ArgoCD App)
+  deploy-full-dev:
+    desc: "Deploy DEV: Application + ArgoCD App"
+    cmds:
+      - task: deploy-dev
+      - task: deploy-argo-dev
+
+  deploy-full-stage:
+    desc: "Deploy STAGE: Application + ArgoCD App"
+    cmds:
+      - task: deploy-stage
+      - task: deploy-argo-stage
+
+  deploy-full-prod:
+    desc: "Deploy PROD: Application + ArgoCD App"
+    cmds:
+      - task: deploy-prod
+      - task: deploy-argo-prod
+
+  # Alle Environments gleichzeitig
+  deploy-all-argo-apps:
+    desc: "Deploy ArgoCD Applications for all environments"
+    cmds:
+      - task: deploy-argo-dev
+      - task: deploy-argo-stage
+      - task: deploy-argo-prod
+
+  # Status und Management
+  argo-status:
+    desc: "Check all ArgoCD applications status"
+    cmds:
+      - echo "=== ArgoCD Applications ==="
+      - kubectl get applications -n argocd -o wide
+      - echo ""
+      - echo "=== Application Details ==="
+      - kubectl get application nginx-demo-dev -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null && echo " - DEV Sync Status" || echo "DEV App not found"
+      - kubectl get application nginx-demo-stage -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null && echo " - STAGE Sync Status" || echo "STAGE App not found"
+      - kubectl get application nginx-demo-prod -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null && echo " - PROD Sync Status" || echo "PROD App not found"
+
+  # Sync Operations
+  sync-argo-dev:
+    desc: "Manually sync DEV ArgoCD application"
+    cmds:
+      - kubectl patch application nginx-demo-dev -n argocd --type=merge -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
+
+  sync-argo-stage:
+    desc: "Manually sync STAGE ArgoCD application"
+    cmds:
+      - kubectl patch application nginx-demo-stage -n argocd --type=merge -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
+
+  sync-argo-prod:
+    desc: "Manually sync PROD ArgoCD application"
+    cmds:
+      - kubectl patch application nginx-demo-prod -n argocd --type=merge -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
+
+  # Cleanup einzelner Apps
+  delete-argo-dev:
+    desc: "Delete DEV ArgoCD application"
+    cmds:
+      - helm uninstall nginx-demo-dev-argo -n argocd
+      - kubectl delete application nginx-demo-dev -n argocd --ignore-not-found=true
+
+  delete-argo-stage:
+    desc: "Delete STAGE ArgoCD application"
+    cmds:
+      - helm uninstall nginx-demo-stage-argo -n argocd
+      - kubectl delete application nginx-demo-stage -n argocd --ignore-not-found=true
+
+  delete-argo-prod:
+    desc: "Delete PROD ArgoCD application"
+    cmds:
+      - helm uninstall nginx-demo-prod-argo -n argocd
+      - kubectl delete application nginx-demo-prod -n argocd --ignore-not-found=true
+
+  # Debug
+  debug-argo-template:
+    desc: "Debug ArgoCD template for DEV"
+    cmds:
+      - helm template nginx-demo-dev-argo nginx-demo/
+        --namespace argocd
+        --set argocd.enabled=true
+        --set argocd.appName=nginx-demo-dev
+        --set argocd.destination.namespace=dev
+
+  # Utilities
   publish:
     desc: "Port-forward ArgoCD UI"
     cmds:
@@ -150,21 +184,21 @@ tasks:
     cmds:
       - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
 
-  argo-create-app:
-    desc: "Create ArgoCD application"
-    cmds:
-      - "kubectl apply -f base/argocd-application.yaml"
-
   clean:
     desc: "Clean up everything"
     cmds:
       - k3d cluster delete
       - rm -rf tmp/
 
-  simulate-upgrade:
-    desc: "Simulate application upgrade across environments"
+  # Kompletter GitOps Workflow
+  setup-gitops:
+    desc: "Complete GitOps setup"
     cmds:
-      - helm upgrade nginx-demo-dev nginx-demo/ --namespace dev --set deployment.replicaCount=5 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/dev
-      - helm upgrade nginx-demo-stage nginx-demo/ --namespace stage --set deployment.replicaCount=4 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/stage
-      - helm upgrade nginx-demo-prod nginx-demo/ --namespace prod --set deployment.replicaCount=6 --post-renderer ./kustomize-post-renderer.sh --post-renderer-args overlays/prod
-      - echo "✅ Upgrade completed - check with 'task list-releases'"
+      - task: build
+      - task: deploy-argocd
+      - echo "Waiting 30s for ArgoCD to be ready..."
+      - sleep 30
+      - task: deploy-all-argo-apps
+      - echo ""
+      - echo "✅ GitOps Setup Complete!"
+      - echo "📋 Next steps:"

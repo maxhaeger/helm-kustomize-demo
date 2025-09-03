@@ -3,8 +3,11 @@ kind: Kustomization
 
 namespace: stage
 
-patchesStrategicMerge:
-  - configmap-patch.yaml
+patches:
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: my-config1
 
 replicas:
   - name: nginx-deployment

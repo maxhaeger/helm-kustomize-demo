@@ -1,18 +1,58 @@
+# nginx-demo/templates/argo-application.yaml
+{{- if .Values.argocd.enabled }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: nginx-demo
-  namespace: argocd
+  name: {{ .Values.argocd.appName | default (printf "%s-%s" .Release.Name .Release.Namespace) }}
+  namespace: {{ .Values.argocd.namespace | default "argocd" }}
+  labels:
+    environment: {{ .Release.Namespace }}
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/managed-by: helm
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   destination:
     namespace: {{ .Release.Namespace }}
-    server: https://kubernetes.{{ .Release.Namespace }}.svc
+    server: {{ .Values.argocd.destination.server | default "https://kubernetes.default.svc" }}
   source:
-    path: nginx-demo
-    repoURL: https://github.com/maxhaeger/helm-kustomize-demo.git
-    targetRevision: master
-  project: default
+    path: {{ .Values.argocd.source.path | default "nginx-demo" }}
+    repoURL: {{ .Values.argocd.source.repoURL }}
+    targetRevision: {{ .Values.argocd.source.targetRevision | default "HEAD" }}
+    {{- if .Values.argocd.source.helm }}
+    helm:
+      {{- if .Values.argocd.source.helm.valueFiles }}
+      valueFiles:
+        {{- toYaml .Values.argocd.source.helm.valueFiles | nindent 8 }}
+      {{- end }}
+      {{- if .Values.argocd.source.helm.parameters }}
+      parameters:
+        {{- range .Values.argocd.source.helm.parameters }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  project: {{ .Values.argocd.project | default "default" }}
   syncPolicy:
+    {{- if .Values.argocd.syncPolicy.automated }}
     automated:
-      prune: true
-      selfHeal: true
+      prune: {{ .Values.argocd.syncPolicy.automated.prune | default false }}
+      selfHeal: {{ .Values.argocd.syncPolicy.automated.selfHeal | default false }}
+      allowEmpty: {{ .Values.argocd.syncPolicy.automated.allowEmpty | default false }}
+    {{- end }}
+    syncOptions:
+      - CreateNamespace=true
+      {{- if .Values.argocd.syncPolicy.syncOptions }}
+      {{- range .Values.argocd.syncPolicy.syncOptions }}
+      - {{ . }}
+      {{- end }}
+      {{- end }}
+    {{- if .Values.argocd.syncPolicy.retry }}
+    retry:
+      limit: {{ .Values.argocd.syncPolicy.retry.limit | default 5 }}
+      backoff:
+        duration: {{ .Values.argocd.syncPolicy.retry.backoff.duration | default "5s" }}
+        factor: {{ .Values.argocd.syncPolicy.retry.backoff.factor | default 2 }}
+        maxDuration: {{ .Values.argocd.syncPolicy.retry.backoff.maxDuration | default "3m" }}
+    {{- end }}
+{{- end }}
