@@ -176,14 +176,7 @@ tasks:
       - >
         helm upgrade --install fluent-bit fluent/fluent-bit
         --namespace logging
-        --set config.outputs[0].name=es
-        --set config.outputs[0].match="kube.*"
-        --set config.outputs[0].host=elasticsearch-master.logging.svc.cluster.local
-        --set config.outputs[0].port=9200
-        --set config.outputs[0].index=fluent-bit
-        --set config.outputs[0].logstash_format=true
-        --set config.outputs[0].logstash_prefix=kubernetes
-        --set config.outputs[0].retry_limit=false
+        --values fluent-bit-values.yaml
 
   monitoring:
     desc: "Deploy complete ELK + Fluent Bit monitoring stack"
