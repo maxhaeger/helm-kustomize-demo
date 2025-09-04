@@ -24,7 +24,8 @@ tasks:
   deploy-dev:
     desc: "Deploy to Development environment (Helm + Kustomize)"
     cmds:
-      - helm upgrade --install nginx-demo-dev nginx-demo/
+      - >
+        helm upgrade --install nginx-demo-dev nginx-demo/
         --namespace dev
         --create-namespace
         --set argocd.enabled=false
@@ -34,7 +35,8 @@ tasks:
   deploy-stage:
     desc: "Deploy to Staging environment (Helm + Kustomize)"
     cmds:
-      - helm upgrade --install nginx-demo-stage nginx-demo/
+      - >
+        helm upgrade --install nginx-demo-stage nginx-demo/
         --namespace stage
         --create-namespace
         --set argocd.enabled=false
@@ -44,7 +46,8 @@ tasks:
   deploy-prod:
     desc: "Deploy to Production environment (Helm + Kustomize)"
     cmds:
-      - helm upgrade --install nginx-demo-prod nginx-demo/
+      - >
+        helm upgrade --install nginx-demo-prod nginx-demo/
         --namespace prod
         --create-namespace
         --set argocd.enabled=false
@@ -55,7 +58,8 @@ tasks:
   deploy-argo-dev:
     desc: "Deploy Development ArgoCD Application"
     cmds:
-      - helm upgrade --install nginx-demo-dev-argo nginx-demo/
+      - >
+        helm upgrade --install nginx-demo-dev-argo nginx-demo/
         --namespace argocd
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-dev
@@ -69,7 +73,8 @@ tasks:
   deploy-argo-stage:
     desc: "Deploy Staging ArgoCD Application"
     cmds:
-      - helm upgrade --install nginx-demo-stage-argo nginx-demo/
+      - >
+        helm upgrade --install nginx-demo-stage-argo nginx-demo/
         --namespace argocd
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-stage
@@ -83,7 +88,8 @@ tasks:
   deploy-argo-prod:
     desc: "Deploy Production ArgoCD Application"
     cmds:
-      - helm upgrade --install nginx-demo-prod-argo nginx-demo/
+      - >
+        helm upgrade --install nginx-demo-prod-argo nginx-demo/
         --namespace argocd
         --set argocd.enabled=true
         --set argocd.appName=nginx-demo-prod
@@ -94,7 +100,6 @@ tasks:
         --set argocd.syncPolicy.automated.selfHeal=false
       - echo "✅ ArgoCD Application for PROD created"
 
-  # GitOps Setup - NUR ArgoCD Applications erstellen
   deploy-all-argo-apps:
     desc: "Deploy ArgoCD Applications for all environments"
     cmds:
@@ -102,14 +107,12 @@ tasks:
       - task: deploy-argo-stage
       - task: deploy-argo-prod
 
-  # Status und Management
   argo-status:
     desc: "Check all ArgoCD applications status"
     cmds:
       - echo "=== ArgoCD Applications ==="
       - kubectl get applications -n argocd -o wide
 
-  # Sync Operations
   sync-all:
     desc: "Sync all ArgoCD applications"
     cmds:
@@ -117,7 +120,6 @@ tasks:
       - kubectl patch application nginx-demo-stage -n argocd --type=merge -p='{"operation":{"sync":{}}}'
       - kubectl patch application nginx-demo-prod -n argocd --type=merge -p='{"operation":{"sync":{}}}'
 
-  # Utilities
   publish:
     desc: "Port-forward ArgoCD UI"
     cmds:
@@ -129,30 +131,160 @@ tasks:
       - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d | pbcopy'
       - echo "✅ ArgoCD admin password copied to clipboard"
 
+  # Monitoring Setup
+  setup-monitoring:
+    desc: "Setup Helm repositories for monitoring"
+    cmds:
+      - helm repo add elastic https://helm.elastic.co
+      - helm repo add fluent https://fluent.github.io/helm-charts
+      - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo update
+      - echo "✅ Monitoring repositories added"
+
+  deploy-elasticsearch:
+    desc: "Deploy Elasticsearch"
+    deps: [setup-monitoring]
+    cmds:
+      - >
+        helm upgrade --install elasticsearch elastic/elasticsearch
+        --namespace logging
+        --create-namespace
+        --set replicas=1
+        --set minimumMasterNodes=1
+        --set resources.requests.cpu="100m"
+        --set resources.requests.memory="512Mi"
+        --set resources.limits.cpu="1000m"
+        --set resources.limits.memory="2Gi"
+        --set persistence.enabled=false
+        --set antiAffinity="soft"
+
+  deploy-kibana:
+    desc: "Deploy Kibana"
+    deps: [deploy-elasticsearch]
+    cmds:
+      - >
+        helm upgrade --install kibana elastic/kibana
+        --namespace logging
+        --set resources.requests.cpu="100m"
+        --set resources.requests.memory="512Mi"
+        --set service.type=LoadBalancer
+
+  deploy-fluent-bit:
+    desc: "Deploy Fluent Bit"
+    deps: [deploy-elasticsearch]
+    cmds:
+      - >
+        helm upgrade --install fluent-bit fluent/fluent-bit
+        --namespace logging
+        --set config.outputs[0].name=es
+        --set config.outputs[0].match="kube.*"
+        --set config.outputs[0].host=elasticsearch-master.logging.svc.cluster.local
+        --set config.outputs[0].port=9200
+        --set config.outputs[0].index=fluent-bit
+        --set config.outputs[0].logstash_format=true
+        --set config.outputs[0].logstash_prefix=kubernetes
+        --set config.outputs[0].retry_limit=false
+
+  monitoring:
+    desc: "Deploy complete ELK + Fluent Bit monitoring stack"
+    cmds:
+      - task: setup-monitoring
+      - task: deploy-elasticsearch
+      - task: deploy-kibana
+      - task: deploy-fluent-bit
+      - echo ""
+      - echo "🎉 Monitoring stack deployed successfully!"
+
+  # Alternative: Grafana Loki Stack (leichtgewichtiger)
+  monitoring-loki:
+    desc: "Deploy Grafana Loki stack (lightweight alternative)"
+    cmds:
+      - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo update
+      - >
+        helm upgrade --install loki grafana/loki-stack
+        --namespace logging
+        --create-namespace
+        --set grafana.enabled=true
+        --set prometheus.enabled=true
+        --set fluent-bit.enabled=true
+        --set grafana.service.type=LoadBalancer
+      - echo "✅ Loki stack deployed"
+
+  monitoring-status:
+    desc: "Check monitoring stack status"
+    cmds:
+      - echo "=== Elasticsearch Status ==="
+      - kubectl get pods -l app=elasticsearch-master -n logging
+      - echo ""
+      - echo "=== Kibana Status ==="
+      - kubectl get pods -l app=kibana -n logging
+      - echo ""
+      - echo "=== Fluent Bit Status ==="
+      - kubectl get pods -l app.kubernetes.io/name=fluent-bit -n logging
+      - echo ""
+      - echo "=== Services ==="
+      - kubectl get svc -n logging
+
+  monitoring-logs:
+    desc: "Show logs from monitoring components"
+    cmds:
+      - echo "=== Elasticsearch Logs ==="
+      - kubectl logs -l app=elasticsearch-master -n logging --tail=20 || echo "No Elasticsearch logs"
+      - echo ""
+      - echo "=== Fluent Bit Logs ==="
+      - kubectl logs -l app.kubernetes.io/name=fluent-bit -n logging --tail=20 || echo "No Fluent Bit logs"
+
+  kibana-access:
+    desc: "Port-forward to access Kibana UI"
+    cmds:
+      - echo "🌐 Opening Kibana on http://localhost:5601"
+      - echo "💡 Create index pattern 'kubernetes-*' with time field '@timestamp'"
+      - kubectl port-forward svc/kibana-kibana 5601:5601 -n logging
+
+  elasticsearch-test:
+    desc: "Test Elasticsearch connectivity"
+    cmds:
+      - echo "🔍 Testing Elasticsearch health..."
+      - kubectl port-forward svc/elasticsearch-master 9200:9200 -n logging &
+      - sleep 5
+      - curl -s http://localhost:9200/_cluster/health?pretty || echo "❌ Elasticsearch not accessible"
+      - curl -s http://localhost:9200/_cat/indices?v || echo "❌ No indices found yet"
+      - pkill -f "port-forward.*9200" || true
+
+  clean-monitoring:
+    desc: "Remove monitoring stack"
+    cmds:
+      - helm uninstall fluent-bit -n logging --ignore-not-found
+      - helm uninstall kibana -n logging --ignore-not-found
+      - helm uninstall elasticsearch -n logging --ignore-not-found
+      - kubectl delete namespace logging --ignore-not-found
+      - echo "✅ Monitoring stack removed"
+
+  # Debugging und Testing
+  test-logs:
+    desc: "Generate test logs and check monitoring"
+    cmds:
+      - echo "🧪 Deploying test application..."
+      - task: deploy-dev
+      - echo "📊 Generating test traffic..."
+      - kubectl port-forward svc/nginx-service 8080:80 -n dev &
+      - sleep 3
+      - for i in {1..20}; do curl -s http://localhost:8080/ > /dev/null; echo "Request $i sent"; sleep 1; done
+      - pkill -f "port-forward.*8080" || true
+      - echo "✅ Test traffic generated. Check Kibana for logs!"
+
+  setup-complete:
+    desc: "Complete setup with cluster, ArgoCD, and monitoring"
+    cmds:
+      - task: build
+      - task: deploy-argocd
+      - task: monitoring
+      - echo ""
+      - echo "🎉 Complete setup finished!"
+
   clean:
     desc: "Clean up everything"
     cmds:
       - k3d cluster delete
       - rm -rf tmp/
-
-  # Cleanup für aktuelles Problem
-  cleanup-argo-conflicts:
-    desc: "Clean up conflicting Helm releases"
-    cmds:
-      - helm uninstall nginx-demo-dev-argo -n argocd --ignore-not-found
-      - helm uninstall nginx-demo-stage-argo -n argocd --ignore-not-found
-      - helm uninstall nginx-demo-prod-argo -n argocd --ignore-not-found
-      - kubectl delete applications --all -n argocd --ignore-not-found
-
-  # Kompletter GitOps Workflow (KORRIGIERT)
-  setup-gitops:
-    desc: "Complete GitOps setup"
-    cmds:
-      - task: build
-      - task: deploy-argocd
-      - echo "Waiting 30s for ArgoCD to be ready..."
-      - sleep 30
-      - task: deploy-all-argo-apps
-      - echo ""
-      - echo "✅ GitOps Setup Complete!"
-      - echo "📋 ArgoCD Applications created. They will sync the actual workloads."
