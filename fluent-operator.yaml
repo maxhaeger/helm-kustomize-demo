@@ -1,0 +1,283 @@
+# Fluent Operator Installation (falls nicht vorhanden)
+# kubectl apply -f https://raw.githubusercontent.com/fluent/fluent-operator/master/config/setup/setup.yaml
+
+---
+# FluentBit Configuration für Log Collection
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: FluentBit
+metadata:
+  name: fluent-bit
+  namespace: fluent
+spec:
+  image: cr.fluentbit.io/fluent/fluent-bit:2.2.0
+  positionDB:
+    hostPath:
+      path: /var/lib/fluent-bit/
+  resources:
+    requests:
+      cpu: 10m
+      memory: 25Mi
+    limits:
+      cpu: 500m
+      memory: 200Mi
+  fluentBitConfigName: fluent-bit-config
+  tolerations:
+    - operator: Exists
+
+---
+# Input: Sammelt alle Container Logs
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Input
+metadata:
+  name: tail-containers
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  tail:
+    path: /var/log/containers/*.log
+    parser: cri
+    tag: kube.*
+    refreshIntervalSeconds: 10
+    memBufLimit: 50MB
+    skipLongLines: true
+    db: /fluent-bit/tail/pos.db
+    dbSync: Normal
+
+---
+# Parser für Container Runtime Interface (CRI)
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Parser
+metadata:
+  name: cri-parser
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  json:
+    name: cri
+    format: json
+    timeKey: time
+    timeFormat: "%Y-%m-%dT%H:%M:%S.%L%z"
+
+---
+# Filter: Kubernetes Metadata hinzufügen und Tags setzen
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Filter
+metadata:
+  name: kubernetes-metadata
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: kube.*
+  kubernetes:
+    kubeURL: https://kubernetes.default.svc:443
+    kubeCAFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    kubeTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    labels: true
+    annotations: true
+    mergeLog: true
+    mergeLogKey: log_processed
+    keepLog: false
+    k8sLoggingParser: true
+    k8sLoggingExclude: true
+
+---
+# Filter: Tag-basiertes Routing Setup
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Filter
+metadata:
+  name: tag-routing
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: kube.*
+  modify:
+    rules:
+      # App-Level Logs (basierend auf Labels oder Namespaces)
+      - Add log_type app-level
+      - Add_if kubernetes.labels.app-type exists app-level kubernetes.labels.app-type
+      
+      # Nginx Access/Error Logs
+      - Add_if kubernetes.container_name nginx log_type nginx-access
+      - Add_if kubernetes.pod_name nginx log_type nginx-access
+      
+      # Metrics Logs (z.B. von Prometheus, Grafana)
+      - Add_if kubernetes.labels.component metrics log_type metrics
+      - Add_if kubernetes.container_name prometheus log_type metrics
+      - Add_if kubernetes.container_name grafana log_type metrics
+      
+      # Traces (z.B. von Jaeger, Zipkin)
+      - Add_if kubernetes.labels.app jaeger log_type traces
+      - Add_if kubernetes.container_name jaeger log_type traces
+      - Add_if kubernetes.container_name zipkin log_type traces
+
+---
+# Output 1: App-Level Logs (zu stdout für Testing)
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Output
+metadata:
+  name: app-level-output
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: kube.*
+  matchRegex: "log_type.*app-level"
+  stdout:
+    format: json_lines
+
+---
+# Output 2: Nginx Logs
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Output
+metadata:
+  name: nginx-output
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: kube.*
+  matchRegex: "log_type.*nginx"
+  stdout:
+    format: json_lines
+
+---
+# Output 3: Metrics Logs
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Output
+metadata:
+  name: metrics-output
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: kube.*
+  matchRegex: "log_type.*metrics"
+  stdout:
+    format: json_lines
+
+---
+# Output 4: Traces Logs
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Output
+metadata:
+  name: traces-output
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: kube.*
+  matchRegex: "log_type.*traces"
+  stdout:
+    format: json_lines
+
+---
+# Alternative: HTTP Output für API-Testing
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: Output
+metadata:
+  name: http-test-output
+  namespace: fluent
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+    fluentbit.fluent.io/mode: "test"
+spec:
+  match: kube.*
+  http:
+    host: httpbin.org
+    port: 80
+    uri: /post
+    format: json
+    jsonDateKey: timestamp
+    jsonDateFormat: iso8601
+
+---
+# Test Pod für Log-Generierung
+apiVersion: v1
+kind: Pod
+metadata:
+  name: log-generator
+  namespace: default
+  labels:
+    app: test-app
+    app-type: application
+    component: backend
+spec:
+  containers:
+  - name: log-generator
+    image: busybox
+    command:
+    - /bin/sh
+    - -c
+    - |
+      while true; do
+        echo "{\"level\":\"info\",\"message\":\"Application log entry\",\"timestamp\":\"$(date -Iseconds)\"}"
+        echo "{\"level\":\"error\",\"message\":\"Application error\",\"timestamp\":\"$(date -Iseconds)\"}"
+        sleep 5
+      done
+
+---
+# Nginx Test Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-test
+  namespace: default
+  labels:
+    app: nginx
+    component: webserver
+spec:
+  containers:
+  - name: nginx
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+
+---
+# Service Account für FluentBit
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluent-bit
+  namespace: fluent
+
+---
+# Cluster Role für FluentBit
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluent-bit-read
+rules:
+- apiGroups: [""]
+  resources:
+  - namespaces
+  - pods
+  - pods/logs
+  verbs: ["get", "list", "watch"]
+
+---
+# Cluster Role Binding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fluent-bit-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fluent-bit-read
+subjects:
+- kind: ServiceAccount
+  name: fluent-bit
+  namespace: fluent
