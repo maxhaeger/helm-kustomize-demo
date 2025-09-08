@@ -131,87 +131,92 @@ tasks:
       - 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d | pbcopy'
       - echo "✅ ArgoCD admin password copied to clipboard"
 
-  # Monitoring Setup
+  # Monitoring Setup with Loki & Grafana
   setup-monitoring:
     desc: "Setup Helm repositories for monitoring"
     cmds:
-      - helm repo add elastic https://helm.elastic.co
-      - helm repo add fluent https://fluent.github.io/helm-charts
       - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo add fluent https://fluent.github.io/helm-charts
       - helm repo update
       - echo "✅ Monitoring repositories added"
 
-  deploy-elasticsearch:
-    desc: "Deploy Elasticsearch"
+  deploy-loki:
+    desc: "Deploy Loki for log aggregation"
     deps: [setup-monitoring]
     cmds:
       - >
-        helm upgrade --install elasticsearch elastic/elasticsearch
+        helm upgrade --install loki grafana/loki
         --namespace logging
         --create-namespace
-        --set replicas=1
-        --set minimumMasterNodes=1
-        --set resources.requests.cpu="100m"
-        --set resources.requests.memory="512Mi"
-        --set resources.limits.cpu="1000m"
-        --set resources.limits.memory="2Gi"
-        --set persistence.enabled=false
-        --set antiAffinity="soft"
+        --set deploymentMode=SingleBinary
+        --set loki.useTestSchema=true
+        --set loki.auth_enabled=false
+        --set loki.commonConfig.replication_factor=1
+        --set loki.storage.type=filesystem
+        --set singleBinary.replicas=1
+        --set backend.replicas=0
+        --set read.replicas=0
+        --set write.replicas=0
+        --set ingester.replicas=0
+        --set querier.replicas=0
+        --set queryFrontend.replicas=0
+        --set queryScheduler.replicas=0
+        --set distributor.replicas=0
+        --set compactor.replicas=0
+        --set indexGateway.replicas=0
+        --set bloomCompactor.replicas=0
+        --set bloomGateway.replicas=0
+        --set monitoring.selfMonitoring.enabled=false
+        --set monitoring.selfMonitoring.grafanaAgent.installOperator=false
+        --set test.enabled=false
+      - echo "✅ Loki deployed"
 
-  deploy-kibana:
-    desc: "Deploy Kibana"
-    deps: [deploy-elasticsearch]
+  deploy-grafana:
+    desc: "Deploy Grafana with Loki datasource"
+    deps: [deploy-loki]
     cmds:
       - >
-        helm upgrade --install kibana elastic/kibana
+        helm upgrade --install grafana grafana/grafana
         --namespace logging
-        --set resources.requests.cpu="100m"
-        --set resources.requests.memory="512Mi"
         --set service.type=LoadBalancer
+        --set service.port=3000
+        --set adminPassword=admin123
+        --set datasources."datasources\.yaml".apiVersion=1
+        --set datasources."datasources\.yaml".datasources[0].name=Loki
+        --set datasources."datasources\.yaml".datasources[0].type=loki
+        --set datasources."datasources\.yaml".datasources[0].url=http://loki:3100
+        --set datasources."datasources\.yaml".datasources[0].access=proxy
+        --set datasources."datasources\.yaml".datasources[0].isDefault=true
+        --set persistence.enabled=false
+      - echo "✅ Grafana deployed with admin/admin123 credentials"
 
-  deploy-fluent-bit:
-    desc: "Deploy Fluent Bit"
-    deps: [deploy-elasticsearch]
+  deploy-fluent-bit-loki:
+    desc: "Deploy Fluent Bit configured for Loki"
+    deps: [deploy-loki]
     cmds:
       - >
         helm upgrade --install fluent-bit fluent/fluent-bit
         --namespace logging
-        --values fluent-bit-values.yaml
+        --values fluent-bit-loki-values.yaml
+      - echo "✅ Fluent Bit deployed for Loki"
 
   monitoring:
-    desc: "Deploy complete ELK + Fluent Bit monitoring stack"
+    desc: "Deploy complete Loki + Grafana + Fluent Bit monitoring stack"
     cmds:
       - task: setup-monitoring
-      - task: deploy-elasticsearch
-      - task: deploy-kibana
-      - task: deploy-fluent-bit
+      - task: deploy-loki
+      - task: deploy-grafana
+      - task: deploy-fluent-bit-loki
       - echo ""
-      - echo "🎉 Monitoring stack deployed successfully!"
-
-  # Alternative: Grafana Loki Stack (leichtgewichtiger)
-  monitoring-loki:
-    desc: "Deploy Grafana Loki stack (lightweight alternative)"
-    cmds:
-      - helm repo add grafana https://grafana.github.io/helm-charts
-      - helm repo update
-      - >
-        helm upgrade --install loki grafana/loki-stack
-        --namespace logging
-        --create-namespace
-        --set grafana.enabled=true
-        --set prometheus.enabled=true
-        --set fluent-bit.enabled=true
-        --set grafana.service.type=LoadBalancer
-      - echo "✅ Loki stack deployed"
 
   monitoring-status:
     desc: "Check monitoring stack status"
     cmds:
-      - echo "=== Elasticsearch Status ==="
-      - kubectl get pods -l app=elasticsearch-master -n logging
+      - echo "=== Loki Status ==="
+      - kubectl get pods -l app.kubernetes.io/name=loki -n logging
       - echo ""
-      - echo "=== Kibana Status ==="
-      - kubectl get pods -l app=kibana -n logging
+      - echo "=== Grafana Status ==="
+      - kubectl get pods -l app.kubernetes.io/name=grafana -n logging
       - echo ""
       - echo "=== Fluent Bit Status ==="
       - kubectl get pods -l app.kubernetes.io/name=fluent-bit -n logging
@@ -222,35 +227,35 @@ tasks:
   monitoring-logs:
     desc: "Show logs from monitoring components"
     cmds:
-      - echo "=== Elasticsearch Logs ==="
-      - kubectl logs -l app=elasticsearch-master -n logging --tail=20 || echo "No Elasticsearch logs"
+      - echo "=== Loki Logs ==="
+      - kubectl logs -l app.kubernetes.io/name=loki -n logging --tail=20 || echo "No Loki logs"
       - echo ""
       - echo "=== Fluent Bit Logs ==="
       - kubectl logs -l app.kubernetes.io/name=fluent-bit -n logging --tail=20 || echo "No Fluent Bit logs"
 
-  kibana-access:
-    desc: "Port-forward to access Kibana UI"
+  grafana-access:
+    desc: "Port-forward to access Grafana UI"
     cmds:
-      - echo "🌐 Opening Kibana on http://localhost:5601"
-      - echo "💡 Create index pattern 'kubernetes-*' with time field '@timestamp'"
-      - kubectl port-forward svc/kibana-kibana 5601:5601 -n logging
+      - echo "🌐 Opening Grafana on http://localhost:3000"
+      - echo "💡 Loki datasource is pre-configured at http://loki:3100"
+      - kubectl port-forward svc/grafana 3000:3000 -n logging
 
-  elasticsearch-test:
-    desc: "Test Elasticsearch connectivity"
+  loki-test:
+    desc: "Test Loki connectivity and show recent logs"
     cmds:
-      - echo "🔍 Testing Elasticsearch health..."
-      - kubectl port-forward svc/elasticsearch-master 9200:9200 -n logging &
+      - echo "🔍 Testing Loki connectivity..."
+      - kubectl port-forward svc/loki 3100:3100 -n logging &
       - sleep 5
-      - curl -s http://localhost:9200/_cluster/health?pretty || echo "❌ Elasticsearch not accessible"
-      - curl -s http://localhost:9200/_cat/indices?v || echo "❌ No indices found yet"
-      - pkill -f "port-forward.*9200" || true
+      - curl -s http://localhost:3100/ready || echo "❌ Loki not ready"
+      - curl -s "http://localhost:3100/loki/api/v1/labels" | jq . || echo "❌ Loki API not accessible"
+      - pkill -f "port-forward.*3100" || true
 
   clean-monitoring:
     desc: "Remove monitoring stack"
     cmds:
       - helm uninstall fluent-bit -n logging --ignore-not-found
-      - helm uninstall kibana -n logging --ignore-not-found
-      - helm uninstall elasticsearch -n logging --ignore-not-found
+      - helm uninstall grafana -n logging --ignore-not-found
+      - helm uninstall loki -n logging --ignore-not-found
       - kubectl delete namespace logging --ignore-not-found
       - echo "✅ Monitoring stack removed"
 
@@ -265,7 +270,7 @@ tasks:
       - sleep 3
       - for i in {1..20}; do curl -s http://localhost:8080/ > /dev/null; echo "Request $i sent"; sleep 1; done
       - pkill -f "port-forward.*8080" || true
-      - echo "✅ Test traffic generated. Check Kibana for logs!"
+      - echo "✅ Test traffic generated. Check Grafana for logs!"
 
   setup-complete:
     desc: "Complete setup with cluster, ArgoCD, and monitoring"
@@ -275,6 +280,10 @@ tasks:
       - task: monitoring
       - echo ""
       - echo "🎉 Complete setup finished!"
+      - echo ""
+      - echo "📱 Access Points:"
+      - echo ""
+      - echo "🔑 Credentials:"
 
   clean:
     desc: "Clean up everything"
