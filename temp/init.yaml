@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: osm-assembler
+spec:
+  initContainers:
+    - name: downloader
+      image: curlimages/curl
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          # Download planet-latest.osm.pbf chunks (aa bis aq)
+          for suffix in aa ab ac ad ae af ag ah ai aj ak al am an ao ap aq; do
+            echo "Downloading planet-latest.osm.pbf.${suffix}..."
+            curl -u $NEXUS_USER:$NEXUS_PASS \
+              "$NEXUS_URL/repository/i0000041-raw-repository/nominatim/planet-latest.osm.pbf.${suffix}" \
+              -o /data/planet-latest.osm.pbf.${suffix}
+          done
+      env:
+        - name: NEXUS_URL
+          value: "https://clw000307.s$PASSWORD@ertifacts.konvoi.svc.intdev.cloud.bwi.intranet-bw.de"
+        - name: NEXUS_USER
+          valueFrom:
+            secretKeyRef:
+              name: nexus_secret
+              key: nexus_raw_secret
+        - name: NEXUS_PASS
+          valueFrom:
+            secretKeyRef:
+              name: nexus_secret
+              key: nexus_raw_secret
+      volumeMounts:
+        - name: data
+          mountPath: /data
+
+  containers:
+    - name: assembler
+      image: busybox
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          # Warte auf Download
+          while [ ! -f /data/planet-latest.osm.pbf.aa ]; do sleep 5; done
+
+          # Assembly in alphabetischer Reihenfolge
+          cat /data/planet-latest.osm.pbf.* > /data/complete.osm.pbf
+
+          # Cleanup
+          rm /data/planet-latest.osm.pbf.*
+
+          echo "Assembly complete: $(du -h /data/complete.osm.pbf)"
+          tail -f /dev/null
+      volumeMounts:
+        - name: data
+          mountPath: /data
+
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: nominatim-volume
+
+  restartPolicy: Never
