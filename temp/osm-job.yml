@@ -1,0 +1,195 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: osm-data-download
+  namespace: ynteract
+spec:
+  ttlSecondsAfterFinished: 300 # Job wird 5 Min nach Completion gelöscht
+  backoffLimit: 3 # Max 3 Retry-Versuche
+  template:
+    metadata:
+      labels:
+        app: osm-downloader
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: nexus-secret # Anpassen an Ihren ImagePullSecret Namen
+      containers:
+        - name: osm-assembler
+          image: curlimages/curl:latest # Lightweight image mit curl
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              set -o pipefail
+
+              echo "=== OSM Data Download and Assembly Job ==="
+              echo "Starting at: $(date)"
+
+              # Nexus Repository Details
+              REPOSITORY="repository/i000041-raw-repository/nominatim"
+              BASE_FILENAME="planet-latest.osm.pbf"
+
+              echo "Nexus URL: $NEXUS_URL"
+              echo "Repository: $REPOSITORY"
+              echo "Target directory: /maps"
+
+              # Verfügbaren Speicherplatz prüfen
+              echo "Available disk space:"
+              df -h /maps
+
+              echo "Checking available chunks in Nexus..."
+
+              # Funktion zum Testen ob eine Datei existiert
+              check_file_exists() {
+                  local suffix=$1
+                  local url="${NEXUS_URL}/${REPOSITORY}/${BASE_FILENAME}.${suffix}"
+                  
+                  if curl -s -f -u "${NEXUS_USER}:${NEXUS_PASS}" -I "$url" > /dev/null 2>&1; then
+                      return 0  # Datei existiert
+                  else
+                      return 1  # Datei existiert nicht
+                  fi
+              }
+
+              # Dynamisch verfügbare Suffixe finden
+              available_suffixes=""
+              chunk_count=0
+
+              for first in {a..z}; do
+                  for second in {a..z}; do
+                      suffix="${first}${second}"
+                      if check_file_exists "$suffix"; then
+                          available_suffixes="$available_suffixes $suffix"
+                          chunk_count=$((chunk_count + 1))
+                          echo "✓ Found chunk: ${BASE_FILENAME}.${suffix}"
+                      else
+                          echo "No more chunks found after ${suffix}"
+                          break 2  # Beende beide Schleifen
+                      fi
+                  done
+              done
+
+              echo "Total chunks found: $chunk_count"
+
+              if [ $chunk_count -eq 0 ]; then
+                  echo "Error: No chunks found!"
+                  exit 1
+              fi
+
+              # Download aller verfügbaren Chunks
+              echo "=== Starting Downloads ==="
+              download_start=$(date +%s)
+
+              for suffix in $available_suffixes; do
+                  echo "Downloading ${BASE_FILENAME}.${suffix}..."
+                  
+                  curl_start=$(date +%s)
+                  curl -k -u "${NEXUS_USER}:${NEXUS_PASS}" \
+                      --progress-bar \
+                      --fail \
+                      --retry 3 \
+                      --retry-delay 5 \
+                      "${NEXUS_URL}/${REPOSITORY}/${BASE_FILENAME}.${suffix}" \
+                      -o "/maps/${BASE_FILENAME}.${suffix}"
+                  
+                  if [ $? -ne 0 ]; then
+                      echo "Error downloading ${BASE_FILENAME}.${suffix}"
+                      exit 1
+                  fi
+                  
+                  curl_end=$(date +%s)
+                  file_size=$(du -h "/maps/${BASE_FILENAME}.${suffix}" | cut -f1)
+                  echo "✓ Downloaded ${BASE_FILENAME}.${suffix} (${file_size}) in $((curl_end - curl_start))s"
+              done
+
+              download_end=$(date +%s)
+              echo "All downloads completed in $((download_end - download_start))s"
+
+              # Disk usage nach Downloads
+              echo "Disk usage after downloads:"
+              df -h /maps
+              du -sh /maps/planet-latest.osm.pbf.* 2>/dev/null || true
+
+              echo "=== Starting Assembly ==="
+              assembly_start=$(date +%s)
+
+              # Dateien zusammenfügen - WARTEN bis cat fertig ist
+              echo "Concatenating $chunk_count files..."
+              cat /maps/${BASE_FILENAME}.* > /maps/${BASE_FILENAME}
+
+              assembly_end=$(date +%s)
+
+              # Prüfen ob cat erfolgreich war
+              if [ $? -eq 0 ] && [ -f "/maps/${BASE_FILENAME}" ]; then
+                  final_size=$(du -h "/maps/${BASE_FILENAME}" | cut -f1)
+                  echo "✓ Assembly successful in $((assembly_end - assembly_start))s"
+                  echo "Final file size: $final_size"
+                  
+                  # Integrität prüfen (einfacher Check)
+                  if [ -s "/maps/${BASE_FILENAME}" ]; then
+                      echo "✓ File integrity check passed (file is not empty)"
+                      
+                      # NUR JETZT die Chunks löschen
+                      echo "Cleaning up chunk files..."
+                      cleanup_start=$(date +%s)
+                      
+                      for suffix in $available_suffixes; do
+                          rm "/maps/${BASE_FILENAME}.${suffix}"
+                      done
+                      
+                      cleanup_end=$(date +%s)
+                      echo "✓ Cleanup completed in $((cleanup_end - cleanup_start))s"
+                      
+                      # Final disk usage
+                      echo "Final disk usage:"
+                      df -h /maps
+                      ls -lh "/maps/${BASE_FILENAME}"
+                      
+                  else
+                      echo "Error: Final file is empty!"
+                      exit 1
+                  fi
+              else
+                  echo "Error: Assembly failed!"
+                  exit 1
+              fi
+
+              total_end=$(date +%s)
+              total_start=$download_start
+              echo "=== Job Completed Successfully ==="
+              echo "Total execution time: $((total_end - total_start))s"
+              echo "Final file: /maps/${BASE_FILENAME}"
+              echo "Completed at: $(date)"
+
+          env:
+            - name: NEXUS_URL
+              value: "https://artifacts.konvoi.svc.intdev.cloud.bwi.intranet-bw.de"
+            - name: NEXUS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-secret
+                  key: raw_nexus_user
+            - name: NEXUS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-secret
+                  key: raw_nexus_secret
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+
+          volumeMounts:
+            - name: nominatim-volume
+              mountPath: /maps
+              subPath: data/maps
+
+      volumes:
+        - name: nominatim-volume
+          persistentVolumeClaim:
+            claimName: geocoding-daten-pvc
