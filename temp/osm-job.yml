@@ -26,6 +26,18 @@ spec:
               REPOSITORY="repository/i000041-raw-repository/nominatim"
               BASE_FILENAME="planet-latest.osm.pbf"
 
+              echo "NEXUS_URL: ${NEXUS_URL}"
+              echo "NEXUS_USER: ${NEXUS_USER}"
+              echo "Testing first file..."
+
+              # Test the first expected file with full debug
+              first_url="${NEXUS_URL}/${REPOSITORY}/${BASE_FILENAME}.aa"
+              echo "Testing: ${first_url}"
+
+              curl_response=$(curl -k -I -s -u "${NEXUS_USER}:${NEXUS_PASS}" "${first_url}" 2>&1)
+              echo "Curl response for .aa file:"
+              echo "$curl_response"
+
               echo "Checking available chunks..."
               suffixes=""
               count=0
@@ -35,11 +47,12 @@ spec:
                 suffix="a${c2}"
                 url="${NEXUS_URL}/${REPOSITORY}/${BASE_FILENAME}.${suffix}"
                 
-                if curl -sf -u "${NEXUS_USER}:${NEXUS_PASS}" -I "$url" >/dev/null 2>&1; then
-                  suffixes="$suffixes $suffix"
+                if curl -k -sf -u "${NEXUS_USER}:${NEXUS_PASS}" -I "${url}" >/dev/null 2>&1; then
+                  suffixes="${suffixes} ${suffix}"
                   count=$((count + 1))
                   echo "Found: ${suffix}"
                 else
+                  echo "Not found: ${suffix}"
                   break
                 fi
               done
