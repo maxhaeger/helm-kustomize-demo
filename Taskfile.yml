@@ -8,7 +8,6 @@ tasks:
     desc: "Create K3D cluster with LoadBalancer port mapping"
     cmds:
       - k3d cluster create --api-port 6550 -p "8080:80@loadbalancer" --agents 2
-      - echo "Cluster created successfully"
 
   # ArgoCD Installation
   deploy-argocd:

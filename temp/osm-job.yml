@@ -21,7 +21,6 @@ spec:
           args:
             - |
               set -e
-
               echo "=== OSM Data Download Job ==="
               REPOSITORY="repository/i000041-raw-repository/nominatim"
               BASE_FILENAME="planet-latest.osm.pbf"
