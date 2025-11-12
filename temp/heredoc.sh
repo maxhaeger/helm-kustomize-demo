@@ -10,3 +10,22 @@ vault write auth/jwt/role/gitlab-ci-role - <<EOF
 }
 }
 EOF
+
+---
+
+
+vault policy write gitlab-ci-deployment - <<EOF
+# Read-only access für GitLab Deployment Secrets
+path "i0000041vpc0000001-secrets/data/gitlab/deployment_*" {
+  capabilities = ["read"]
+}
+
+path "i0000041vpc0000001-secrets/data/gitlab/*" {
+  capabilities = ["read"]
+}
+
+# Falls du auch metadata brauchst
+path "i0000041vpc0000001-secrets/metadata/gitlab/*" {
+  capabilities = ["read", "list"]
+}
+EOF
