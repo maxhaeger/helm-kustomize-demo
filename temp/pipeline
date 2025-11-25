@@ -130,3 +130,47 @@ wait-for-image:
 
   needs:
       - order-xelosImage-job
+
+---
+
+
+
+script:
+    - |
+      NEXUS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
+      # URL zusammenbauen (Variable IntDev_Nexus_ScannedRepo muss gesetzt sein!)
+      NEXUS_URL="https://${IntDev_Nexus_ScannedRepo}/v2/registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}/manifests/${XELOS_IMAGE_TAG}"
+      
+      MAX_WAIT=1800  # 30m
+      SLEEP_INTERVAL=30  # 30s
+      
+      echo "Prüfe URL: ${NEXUS_URL}"
+      echo "Warten bis Image: ${NEXUS_IMAGE} im Scanned Nexus Repo verfügbar ist..."
+
+      ELAPSED=0
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        # Wir holen nur den HTTP Status Code (-w %{http_code}) und verwerfen den Output (-o /dev/null)
+        # WICHTIG: Der Accept Header ist notwendig für Docker V2 API!
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          -u "${NEXUS_USER}:${NEXUS_PASSWORD}" \
+          -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+          -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+          "${NEXUS_URL}")
+
+        if [ "$HTTP_CODE" -eq 200 ]; then
+          echo "SUCCESS: Image im Nexus gefunden (HTTP 200)."
+          exit 0
+        fi
+
+        # Optional: Debugging Ausgabe, falls es nicht 404 ist (z.B. 401 Unauthorized oder 500)
+        if [ "$HTTP_CODE" -ne 404 ]; then
+             echo "WARNUNG: Unerwarteter Status Code: $HTTP_CODE"
+        fi
+
+        echo "Image noch nicht verfügbar (Status: $HTTP_CODE). Warten... ($ELAPSED/$MAX_WAIT seconds)"
+        sleep $SLEEP_INTERVAL
+        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+      done
+
+      echo "TIMEOUT: Image wurde nicht innerhalb von $MAX_WAIT Sekunden gefunden."
+      exit 1
