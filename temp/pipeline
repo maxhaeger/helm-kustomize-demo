@@ -217,3 +217,77 @@ build-maptilerImage-job:
    rules:
      - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
        when: always
+
+
+---
+
+
+wait-for-image:
+  # Nutze das Podman Image für native Registry-Interaktion
+  image: dev.harbor.sde.svc.intcloud.bwi.intranet-bw.de/sde-images/podman:4.9.4
+  tags:
+    - sde-common
+  stage: wait
+
+  # NEU: Lokale Variablen-Definition für diesen Job (Konsistent mit Build-Jobs)
+  variables:
+    SRC_REPO: $IntDev_Nexus_ScannedRepo
+    # Die vollständige Pfadangabe ohne Tag
+    SRC_IMG_BASE: registry.xelos.net/bwi/xelos-$XELOS_MAJOR_VERSION
+    SRC_IMG_TAG: $XELOS_IMAGE_TAG
+
+  # Secrets für Nexus Login (angenommen, sie werden in der CI/CD-Umgebung verfügbar gemacht)
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: ${VAULT_SERVER_URL}
+
+  secrets:
+    PIPELINE_SA_USER: 
+      vault: gitlab/pipeline_sa_user@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+    PIPELINE_SA_PASSWORD: 
+      vault: gitlab/pipeline_sa_password@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+    # Die ursprünglichen NEXUS_USER/PASSWORD Secrets werden hier NICHT mehr benötigt,
+    # da wir PIPELINE_SA_USER/PASSWORD nutzen, wie in den Build-Jobs.
+    # (Wenn NEXUS_USER/PASSWORD die gleichen Werte haben, können Sie diese stattdessen verwenden)
+
+  # NEU: Login vor dem Haupt-Skript
+  before_script:
+    - echo "--- Podman Login zum Scanned Repo ---"
+    - echo "$PIPELINE_SA_PASSWORD" | podman login $SRC_REPO -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+
+  script:
+    - |
+      IMAGE_FULL_REF="${SRC_REPO}/${SRC_IMG_BASE}:${SRC_IMG_TAG}"
+      MAX_WAIT=1800  # 30m
+      SLEEP_INTERVAL=30  # 30s
+      
+      echo "Prüfe auf Image: ${IMAGE_FULL_REF}"
+      
+      ELAPSED=0
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        
+        # podman manifest inspect nutzt die zuvor durchgeführte Authentifizierung
+        if podman manifest inspect --tls-verify=false "${IMAGE_FULL_REF}" > /dev/null 2>&1; then
+          echo "SUCCESS: Image Manifest gefunden und validiert."
+          exit 0
+        fi
+
+        echo "Image noch nicht verfügbar. Warten... ($ELAPSED / $MAX_WAIT seconds)"
+        sleep $SLEEP_INTERVAL
+        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+      done
+      
+      echo "TIMEOUT: Image konnte nicht im Nexus gefunden werden innerhalb $MAX_WAIT Sekunden"
+      exit 1
+
+  # NEU: Logout nach dem Haupt-Skript
+  after_script:
+    - echo "--- Podman Logout ---"
+    - podman logout $SRC_REPO
+    
+  needs:
+    - order-xelosImage-job
