@@ -103,74 +103,117 @@ wait-for-image:
 
 
   script:
-    - |
-      NEXUS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
-      NEXUS_SCANNED_REPO="$IntDev_Nexus_ScannedRepo"
-      MAX_WAIT=1800  # 30m
-      SLEEP_INTERVAL=30  # 30s
-      echo "https://${NEXUS_SCANNED_REPO}/v2/registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}/manifests/${XELOS_IMAGE_TAG}"
-      echo "Warten bis Image: ${NEXUS_IMAGE} im Scanned Nexus Repo verfügbar ist  ."
-
-      ELAPSED=0
-      while [ $ELAPSED -lt $MAX_WAIT ]; do
-        if curl -f -s -u "${NEXUS_USER}:${NEXUS_PASSWORD}" \
-          "https://${NEXUS_SCANNED_REPO}/v2/registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}/manifests/${XELOS_IMAGE_TAG}" \
-          | grep -q "schemaVersion"; then
-          echo "Image bisher nicht gefunden im Scanned Nexus Repo"
-          exit 0
-        fi
-
-        echo "Image noch nicht verfügbar. Warten... ("$ELAPSED/$MAX_WAIT seconds")"
-        sleep $SLEEP_INTERVAL
-        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
-      done
-
-      echo "Timeout_ Image konnte nicht im Nexus gefunden werden innerhalb $MAX_WAIT Sekunden"
-      exit 1
+      - |
+        NEXUS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
+        NEXUS_URL="https://${IntDev_Nexus_ScannedRepo}/v2/registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}/manifests/${XELOS_IMAGE_TAG}"
+        
+        MAX_WAIT=1800  # 30m
+        SLEEP_INTERVAL=30  # 30s
+        
+        echo "Prüfe URL: ${NEXUS_URL}"
+        echo "Warten bis Image: ${NEXUS_IMAGE} im Scanned Nexus Repo verfügbar ist..."
+  
+        ELAPSED=0
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+          HTTP_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" \
+            -u "${NEXUS_USER}:${NEXUS_PASSWORD}" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+            "${NEXUS_URL}")
+  
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "SUCCESS: Image im Nexus gefunden (HTTP 200)."
+            exit 0
+          fi
+  
+          if [ "$HTTP_CODE" -ne 404 ]; then
+               echo "WARNUNG: Unerwarteter Status Code: $HTTP_CODE"
+          fi
+  
+          echo "Image noch nicht verfügbar (Status: $HTTP_CODE). Warten... ($ELAPSED/$MAX_WAIT seconds)"
+          sleep $SLEEP_INTERVAL
+          ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+        done
+  
+        echo "TIMEOUT: Image wurde nicht innerhalb von $MAX_WAIT Sekunden gefunden."
+        exit 1
 
   needs:
       - order-xelosImage-job
+build-xelosImage-job:
+   tags:
+     - sde-common
+   image: dev.harbor.sde.svc.intcloud.bwi.intranet-bw.de/sde-images/podman:4.9.4
+   stage: build
+   variables: 
+     SRC_REPO: $IntDev_Nexus_ScannedRepo
+     SRC_IMG_PATH: registry.xelos.net
+     SRC_IMG: bwi/xelos-$XELOS_MAJORVERSION:${XELOS_IMAGE_TAG}
+     TRG_REPO: $IntDev_Nexus_UnScannedRepo
+     TRG_IMG_PATH: xelos
+     TRG_IMG: bwi:V${XELOS_MAJORVERSION}_${XELOS_IMAGE_TAG}_build_${CI_COMMIT_SHORT_SHA}
 
----
+   before_script:
+     - echo "pipeline_user:$PIPELINE_SA_USER"
+     - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_ScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+     - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_UnScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
 
+   script:
+     - echo "Erzeuge BWI-spezifisches Xelos-Image"
+     - cd docker/xelos
+     - podman build --tls-verify=false -f dockerfile.xelos -t $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --format docker 
+         --build-arg IMG=$SRC_IMG 
+         --build-arg REPO=$SRC_REPO 
+         --build-arg IMG_PATH=$SRC_IMG_PATH
+         --build-arg HTTP_PROXY=$INET_PROXY
+         --build-arg http_proxy=$INET_PROXY
+         --build-arg HTTPS_PROXY=$INET_PROXY
+         --build-arg https_proxy=$INET_PROXY
+         --build-arg NO_PROXY="" 
+     - podman push $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --tls-verify=false
 
+   after_script:
+     - podman logout $IntDev_Nexus_UnScannedRepo
+     - podman logout $IntDev_Nexus_ScannedRepo
 
-script:
-    - |
-      NEXUS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
-      # URL zusammenbauen (Variable IntDev_Nexus_ScannedRepo muss gesetzt sein!)
-      NEXUS_URL="https://${IntDev_Nexus_ScannedRepo}/v2/registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}/manifests/${XELOS_IMAGE_TAG}"
-      
-      MAX_WAIT=1800  # 30m
-      SLEEP_INTERVAL=30  # 30s
-      
-      echo "Prüfe URL: ${NEXUS_URL}"
-      echo "Warten bis Image: ${NEXUS_IMAGE} im Scanned Nexus Repo verfügbar ist..."
+   rules:
+     - if: $XELOS_IMAGE_TAG != 'Tag value'
+       when: always
 
-      ELAPSED=0
-      while [ $ELAPSED -lt $MAX_WAIT ]; do
-        # Wir holen nur den HTTP Status Code (-w %{http_code}) und verwerfen den Output (-o /dev/null)
-        # WICHTIG: Der Accept Header ist notwendig für Docker V2 API!
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-          -u "${NEXUS_USER}:${NEXUS_PASSWORD}" \
-          -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-          -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-          "${NEXUS_URL}")
+build-maptilerImage-job:
+   tags:
+     - sde-common
+   stage: build
+   variables: 
+     SRC_REPO: $IntDev_Nexus_ScannedRepo
+     SRC_IMG_PATH: "registry-1.docker.io/library"
+     SRC_IMG: ubuntu:${UBUNTU_SRC_IMAGE_TAG}
+     TRG_REPO: $IntDev_Nexus_UnScannedRepo
+     TRG_IMG_PATH: xelos
+     TRG_IMG: maptiler:${MAPTILER_TRG_IMAGE_TAG}
+ #    RAW_REPO_URL: https://artifacts.konvoi.ews-cloud.bwi/repository/i0000041a0000002-raw-repository
+ #    MAPTILER_BIN: maptiler-server-v4.5.1-62ca322f-e117-4759-9533-ed7a0d7f537b-linux.deb
+   before_script:
+     - echo "pipeline_user:$PIPELINE_SA_USER"
+     - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_ScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+     - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_UnScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+   
+   script:
+     - echo "Erzeuge BWI-spezifisches Maptiler-Image"
+     - cd docker/maptiler
+ #    - curl -k --output $MAPTILER_BIN $RAW_REPO_URL/$MAPTILER_BIN
+     - mv ../../binaries/maptiler/*.deb .
+     - podman build --tls-verify=false -f Dockerfile -t $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --format docker --build-arg IMG=$SRC_IMG_PATH/$SRC_IMG --build-arg REPO=$SRC_REPO
+         --build-arg HTTP_PROXY=$INET_PROXY
+         --build-arg http_proxy=$INET_PROXY
+         --build-arg HTTPS_PROXY=$INET_PROXY
+         --build-arg https_proxy=$INET_PROXY
+         --build-arg NO_PROXY="" 
+     - podman push $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --tls-verify=false
 
-        if [ "$HTTP_CODE" -eq 200 ]; then
-          echo "SUCCESS: Image im Nexus gefunden (HTTP 200)."
-          exit 0
-        fi
-
-        # Optional: Debugging Ausgabe, falls es nicht 404 ist (z.B. 401 Unauthorized oder 500)
-        if [ "$HTTP_CODE" -ne 404 ]; then
-             echo "WARNUNG: Unerwarteter Status Code: $HTTP_CODE"
-        fi
-
-        echo "Image noch nicht verfügbar (Status: $HTTP_CODE). Warten... ($ELAPSED/$MAX_WAIT seconds)"
-        sleep $SLEEP_INTERVAL
-        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
-      done
-
-      echo "TIMEOUT: Image wurde nicht innerhalb von $MAX_WAIT Sekunden gefunden."
-      exit 1
+   after_script:
+     - podman logout $IntDev_Nexus_UnScannedRepo
+     - podman logout $IntDev_Nexus_ScannedRepo
+   rules:
+     - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
+       when: always
