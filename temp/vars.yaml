@@ -1,0 +1,11 @@
+  - docker.io/xelos/xelos-worker:libreoffice-20251028
+  - docker.io/xelos/xelos-worker:image-20251010
+  - docker.io/xelos/xelos-worker:image-20251028
+  - docker.io/xelos/xelos-worker:video-20251010
+  - registry.xelos.net/bwi/xelos-12:2025-10-28
+  - registry.xelos.net/bwi/xelos-12:2025-11-01
+  - registry.xelos.net/bwi/xelos-12:2025-11-06
+  - registry.xelos.net/bwi/xelos-12:2025-11-12
+  - registry.xelos.net/bwi/xelos-12:2025-11-13
+  - registry.xelos.net/bwi/xelos-12:12.0.4
+charts: []
