@@ -78,72 +78,68 @@ order-xelosImage-job:
     - export XELOS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
     - cd ansible
     - ansible-playbook playbook.yml -e "new_xelos_image=${XELOS_IMAGE}" -e "vra_hostname=${VRA_HOSTNAME}" -e "vra_username=${VRA_USERNAME}" -e "vra_password=${VRA_PASSWORD}" -e "project_namespace=${PROJECT_NAMESPACE}" -e "project_id=${PROJECT_ID}" -e "deployment_name=${DEPLOYMENT_NAME}" -e "deployment_id=${DEPLOYMENT_ID}"
+  rules:
+    - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
 
-wait-for-image:
-  image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/socn/curl:8.14.1
+wait-xelosImage-job:
+  image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/sde-images/podman:v4.9.4
   tags:
     - sde-common
-
-
   stage: wait
+
+  variables:
+    SRC_REPO: $IntDev_Nexus_ScannedRepo
+    SRC_IMG_BASE: registry.xelos.net/bwi/xelos-$XELOS_MAJOR_VERSION
+    SRC_IMG_TAG: $XELOS_IMAGE_TAG
 
   id_tokens:
     VAULT_ID_TOKEN:
       aud: ${VAULT_SERVER_URL}
 
-  secrets:
-    NEXUS_USER:
-      vault: gitlab/nexus_username@${VAULT_MOUNT_PATH}
-      token: ${VAULT_ID_TOKEN}
-      file: false
-    NEXUS_PASSWORD:
-      vault: gitlab/nexus_password@${VAULT_MOUNT_PATH}
-      token: ${VAULT_ID_TOKEN}
-      file: false
-
+  before_script:
+    - echo "pipeline_user:$PIPELINE_SA_USER"
+    - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_ScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+    - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_UnScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
 
   script:
-      - |
-        NEXUS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
-        NEXUS_URL="https://${IntDev_Nexus_ScannedRepo}/v2/registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}/manifests/${XELOS_IMAGE_TAG}"
-        
-        MAX_WAIT=1800  # 30m
-        SLEEP_INTERVAL=30  # 30s
-        
-        echo "Prüfe URL: ${NEXUS_URL}"
-        echo "Warten bis Image: ${NEXUS_IMAGE} im Scanned Nexus Repo verfügbar ist..."
-  
-        ELAPSED=0
-        while [ $ELAPSED -lt $MAX_WAIT ]; do
-          HTTP_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" \
-            -u "${NEXUS_USER}:${NEXUS_PASSWORD}" \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-            "${NEXUS_URL}")
-  
-          if [ "$HTTP_CODE" -eq 200 ]; then
-            echo "SUCCESS: Image im Nexus gefunden (HTTP 200)."
-            exit 0
-          fi
-  
-          if [ "$HTTP_CODE" -ne 404 ]; then
-               echo "WARNUNG: Unerwarteter Status Code: $HTTP_CODE"
-          fi
-  
-          echo "Image noch nicht verfügbar (Status: $HTTP_CODE). Warten... ($ELAPSED/$MAX_WAIT seconds)"
-          sleep $SLEEP_INTERVAL
-          ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
-        done
-  
-        echo "TIMEOUT: Image wurde nicht innerhalb von $MAX_WAIT Sekunden gefunden."
-        exit 1
+    - |
+      IMAGE_FULL_REF="${SRC_REPO}/${SRC_IMG_BASE}:${SRC_IMG_TAG}"
+      MAX_WAIT=1800  # 30m
+      SLEEP_INTERVAL=30  # 30s
+      
+      echo "Prüfe auf Image: ${IMAGE_FULL_REF}"
+      
+      ELAPSED=0
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        if podman manifest inspect --tls-verify=false "${IMAGE_FULL_REF}" > /dev/null 2>&1; then
+          echo "SUCCESS: Image Manifest gefunden und validiert."
+          exit 0
+        fi
 
+        echo "Image noch nicht verfügbar. Warten... ($ELAPSED / $MAX_WAIT seconds)"
+        sleep $SLEEP_INTERVAL
+        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+      done
+      
+      echo "TIMEOUT: Image konnte nicht im Nexus gefunden werden innerhalb $MAX_WAIT Sekunden"
+      exit 1
+
+  after_script:
+    - podman logout $IntDev_Nexus_UnScannedRepo
+    - podman logout $IntDev_Nexus_ScannedRepo
   needs:
-      - order-xelosImage-job
+    - order-xelosImage-job
+
+  rules:
+    - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
+
+
 build-xelosImage-job:
    tags:
      - sde-common
-   image: dev.harbor.sde.svc.intcloud.bwi.intranet-bw.de/sde-images/podman:4.9.4
+   image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/sde-images/podman:v4.9.4
    stage: build
    variables: 
      SRC_REPO: $IntDev_Nexus_ScannedRepo
@@ -180,9 +176,12 @@ build-xelosImage-job:
      - if: $XELOS_IMAGE_TAG != 'Tag value'
        when: always
 
+   needs:
+     - wait-xelosImage-job
 build-maptilerImage-job:
    tags:
      - sde-common
+   image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/sde-images/podman:v4.9.4
    stage: build
    variables: 
      SRC_REPO: $IntDev_Nexus_ScannedRepo
@@ -217,77 +216,3 @@ build-maptilerImage-job:
    rules:
      - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
        when: always
-
-
----
-
-
-wait-for-image:
-  # Nutze das Podman Image für native Registry-Interaktion
-  image: dev.harbor.sde.svc.intcloud.bwi.intranet-bw.de/sde-images/podman:4.9.4
-  tags:
-    - sde-common
-  stage: wait
-
-  # NEU: Lokale Variablen-Definition für diesen Job (Konsistent mit Build-Jobs)
-  variables:
-    SRC_REPO: $IntDev_Nexus_ScannedRepo
-    # Die vollständige Pfadangabe ohne Tag
-    SRC_IMG_BASE: registry.xelos.net/bwi/xelos-$XELOS_MAJOR_VERSION
-    SRC_IMG_TAG: $XELOS_IMAGE_TAG
-
-  # Secrets für Nexus Login (angenommen, sie werden in der CI/CD-Umgebung verfügbar gemacht)
-  id_tokens:
-    VAULT_ID_TOKEN:
-      aud: ${VAULT_SERVER_URL}
-
-  secrets:
-    PIPELINE_SA_USER: 
-      vault: gitlab/pipeline_sa_user@${VAULT_MOUNT_PATH}
-      token: ${VAULT_ID_TOKEN}
-      file: false
-    PIPELINE_SA_PASSWORD: 
-      vault: gitlab/pipeline_sa_password@${VAULT_MOUNT_PATH}
-      token: ${VAULT_ID_TOKEN}
-      file: false
-    # Die ursprünglichen NEXUS_USER/PASSWORD Secrets werden hier NICHT mehr benötigt,
-    # da wir PIPELINE_SA_USER/PASSWORD nutzen, wie in den Build-Jobs.
-    # (Wenn NEXUS_USER/PASSWORD die gleichen Werte haben, können Sie diese stattdessen verwenden)
-
-  # NEU: Login vor dem Haupt-Skript
-  before_script:
-    - echo "--- Podman Login zum Scanned Repo ---"
-    - echo "$PIPELINE_SA_PASSWORD" | podman login $SRC_REPO -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
-
-  script:
-    - |
-      IMAGE_FULL_REF="${SRC_REPO}/${SRC_IMG_BASE}:${SRC_IMG_TAG}"
-      MAX_WAIT=1800  # 30m
-      SLEEP_INTERVAL=30  # 30s
-      
-      echo "Prüfe auf Image: ${IMAGE_FULL_REF}"
-      
-      ELAPSED=0
-      while [ $ELAPSED -lt $MAX_WAIT ]; do
-        
-        # podman manifest inspect nutzt die zuvor durchgeführte Authentifizierung
-        if podman manifest inspect --tls-verify=false "${IMAGE_FULL_REF}" > /dev/null 2>&1; then
-          echo "SUCCESS: Image Manifest gefunden und validiert."
-          exit 0
-        fi
-
-        echo "Image noch nicht verfügbar. Warten... ($ELAPSED / $MAX_WAIT seconds)"
-        sleep $SLEEP_INTERVAL
-        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
-      done
-      
-      echo "TIMEOUT: Image konnte nicht im Nexus gefunden werden innerhalb $MAX_WAIT Sekunden"
-      exit 1
-
-  # NEU: Logout nach dem Haupt-Skript
-  after_script:
-    - echo "--- Podman Logout ---"
-    - podman logout $SRC_REPO
-    
-  needs:
-    - order-xelosImage-job
