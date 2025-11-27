@@ -4,7 +4,7 @@ variables:
         value: "12"
     XELOS_IMAGE_TAG:
         value: "Tag value"
-        description: "Name des Tags vom anzureichernden Xelos-Image"    
+        description: "Name des Tags vom zu bestellenden & anzureichernden Xelos-Image"    
     UBUNTU_SRC_IMAGE_TAG:
         value: "24.04"
         description: "Name des Tags vom verwendeten Ubuntu-Image für das Maptiler-Image"
@@ -25,7 +25,8 @@ stages:
   - order
   - wait
   - build
-
+  - scan-xelos
+  - scan-maptiler
 
 order-xelosImage-job:
   image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/socn/ansible:2.18.6
@@ -39,18 +40,18 @@ order-xelosImage-job:
       aud: ${VAULT_SERVER_URL}
 
   secrets:
-    DEPLOYMENT_ID:
-      vault: gitlab/deployment_id@${VAULT_MOUNT_PATH}
+    ORDER_DEPLOYMENT_ID:
+      vault: gitlab/order_deployment_id@${VAULT_MOUNT_PATH}
       token: ${VAULT_ID_TOKEN}
       file: false
 
-    DEPLOYMENT_NAME:
-      vault: gitlab/deployment_name@${VAULT_MOUNT_PATH}
+    ORDER_DEPLOYMENT_NAME:
+      vault: gitlab/order_deployment_name@${VAULT_MOUNT_PATH}
       token: ${VAULT_ID_TOKEN}
       file: false
 
-    PROJECT_ID:
-      vault: gitlab/project_id@${VAULT_MOUNT_PATH}
+    ORDER_PROJECT_ID:
+      vault: gitlab/order_project_id@${VAULT_MOUNT_PATH}
       token: ${VAULT_ID_TOKEN}
       file: false
 
@@ -77,9 +78,12 @@ order-xelosImage-job:
   script:
     - export XELOS_IMAGE="registry.xelos.net/bwi/xelos-${XELOS_MAJOR_VERSION}:${XELOS_IMAGE_TAG}"
     - cd ansible
-    - ansible-playbook playbook.yml -e "new_xelos_image=${XELOS_IMAGE}" -e "vra_hostname=${VRA_HOSTNAME}" -e "vra_username=${VRA_USERNAME}" -e "vra_password=${VRA_PASSWORD}" -e "project_namespace=${PROJECT_NAMESPACE}" -e "project_id=${PROJECT_ID}" -e "deployment_name=${DEPLOYMENT_NAME}" -e "deployment_id=${DEPLOYMENT_ID}"
+    - ansible-playbook playbook.yml -t order -e "new_xelos_image=${XELOS_IMAGE}" -e "vra_hostname=${VRA_HOSTNAME}" -e "vra_username=${VRA_USERNAME}" -e "vra_password=${VRA_PASSWORD}" -e "project_namespace=${PROJECT_NAMESPACE}" -e "project_id=${ORDER_PROJECT_ID}" -e "deployment_name=${ORDER_DEPLOYMENT_NAME}" -e "deployment_id=${ORDER_DEPLOYMENT_ID}"
   rules:
     - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
+    - changes:
+        - ansible/aria-order/vars/artifacts.yml
       when: always
 
 wait-xelosImage-job:
@@ -144,10 +148,10 @@ build-xelosImage-job:
    variables: 
      SRC_REPO: $IntDev_Nexus_ScannedRepo
      SRC_IMG_PATH: registry.xelos.net
-     SRC_IMG: bwi/xelos-$XELOS_MAJORVERSION:${XELOS_IMAGE_TAG}
+     SRC_IMG: bwi/xelos-$XELOS_MAJOR_VERSION:${XELOS_IMAGE_TAG}
      TRG_REPO: $IntDev_Nexus_UnScannedRepo
      TRG_IMG_PATH: xelos
-     TRG_IMG: bwi:V${XELOS_MAJORVERSION}_${XELOS_IMAGE_TAG}_build_${CI_COMMIT_SHORT_SHA}
+     TRG_IMG: bwi:V${XELOS_MAJOR_VERSION}_${XELOS_IMAGE_TAG}_build_${CI_COMMIT_SHORT_SHA}
 
    before_script:
      - echo "pipeline_user:$PIPELINE_SA_USER"
@@ -178,6 +182,8 @@ build-xelosImage-job:
 
    needs:
      - wait-xelosImage-job
+
+
 build-maptilerImage-job:
    tags:
      - sde-common
@@ -216,3 +222,122 @@ build-maptilerImage-job:
    rules:
      - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
        when: always
+
+
+scan-xelosImage-job:
+  image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/socn/ansible:2.18.6
+  tags:
+    - sde-common
+
+  stage: scan-xelos
+
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: ${VAULT_SERVER_URL}
+
+  secrets:
+    SCAN_DEPLOYMENT_ID:
+      vault: gitlab/scan_deployment_id@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    SCAN_DEPLOYMENT_NAME:
+      vault: gitlab/scan_deployment_name@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    SCAN_PROJECT_ID:
+      vault: gitlab/scan_project_id@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    PROJECT_NAMESPACE:
+      vault: gitlab/project_namespace@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_HOSTNAME:
+      vault: gitlab/vra_hostname@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_USERNAME:
+      vault: gitlab/vra_username@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_PASSWORD:
+      vault: gitlab/vra_password@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+  script:
+    - export XELOS_IMAGE="i0000041-image-repository.artifacts.konvoi.svc.intdev.cloud.bwi.intranet-bw.de/xelos/bwi:V${XELOS_MAJOR_VERSION}_${XELOS_IMAGE_TAG}_build_${CI_COMMIT_SHORT_SHA}"          
+    - cd ansible
+    - ansible-playbook playbook.yml -t scan -e "new_xelos_image=${XELOS_IMAGE}" -e "vra_hostname=${VRA_HOSTNAME}" -e "vra_username=${VRA_USERNAME}" -e "vra_password=${VRA_PASSWORD}" -e "project_namespace=${PROJECT_NAMESPACE}" -e "project_id=${SCAN_PROJECT_ID}" -e "deployment_name=${SCAN_DEPLOYMENT_NAME}" -e "deployment_id=${SCAN_DEPLOYMENT_ID}"
+  rules:
+    - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
+
+
+scan-maptilerImage-job:
+  image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/socn/ansible:2.18.6
+  tags:
+    - sde-common
+
+  stage: scan-maptiler
+
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: ${VAULT_SERVER_URL}
+
+  secrets:
+    SCAN_DEPLOYMENT_ID:
+      vault: gitlab/scan_deployment_id@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    SCAN_DEPLOYMENT_NAME:
+      vault: gitlab/scan_deployment_name@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    SCAN_PROJECT_ID:
+      vault: gitlab/scan_project_id@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    PROJECT_NAMESPACE:
+      vault: gitlab/project_namespace@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_HOSTNAME:
+      vault: gitlab/vra_hostname@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_USERNAME:
+      vault: gitlab/vra_username@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_PASSWORD:
+      vault: gitlab/vra_password@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+  script:
+    - export MAPTILER_IMAGE="i0000041-image-repository.artifacts.konvoi.svc.intdev.cloud.bwi.intranet-bw.de/xelos/maptiler:${MAPTILER_TRG_IMAGE_TAG}"                         
+    - cd ansible
+    - ansible-playbook playbook.yml -t scan -e "new_xelos_image=${MAPTILER_IMAGE}" -e "vra_hostname=${VRA_HOSTNAME}" -e "vra_username=${VRA_USERNAME}" -e "vra_password=${VRA_PASSWORD}" -e "project_namespace=${PROJECT_NAMESPACE}" -e "project_id=${SCAN_PROJECT_ID}" -e "deployment_name=${SCAN_DEPLOYMENT_NAME}" -e "deployment_id=${SCAN_DEPLOYMENT_ID}"
+  
+  needs:
+    - build-maptilerImage-job 
+
+  rules:
+    - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
+      when: always
+      changes:
+        - ansible/aria-scan/vars/artifacts.yml
+      when: always
