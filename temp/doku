@@ -1,0 +1,114 @@
+Betriebsdokumentation: Image-Bereitstellungs-Pipeline (GitLab CI/CD)
+Diese Dokumentation beschreibt die Struktur, Nutzung und Authentifizierungsmechanismen der zentralen GitLab CI/CD Pipeline zur automatisierten Bestellung, Anreicherung und Scannung von Xelos- und Maptiler-Images.
+Basisinformationen
+| Feld | Wert |
+| :--- | :--- |
+| Stand der Dokumentation | 28.11.2025 |
+| Pipeline-File | gitlab-ci.yml |
+| Geltungsbereich | Automatisierte Bereitstellung und Anreicherung von Xelos- und Maptiler-Images |
+1. Übersicht und Verantwortlichkeiten
+Diese Pipeline ist in fünf sequenzielle Stages unterteilt und dient der sicheren, authentifizierten Bereitstellung von Basis-Images, deren Anreicherung und der anschließenden Registrierung/Scannung.
+
+
+Stage
+Jobs
+Beschreibung
+Werkzeug
+order
+order-xelosImage-job
+Löst über vRA (Aria Automation) die Bestellung des Basis-Images (Xelos) im Nexus Scanned Repository aus.
+Ansible
+wait
+wait-xelosImage-job
+Wartet in einer Schleife (bis zu 30 Minuten), bis das bestellte Basis-Image im Nexus verfügbar ist.
+Podman (Manifest Inspect)
+build
+build-xelosImage-job
+Baut das BWI-spezifische Xelos-Image, basierend auf dem Basis-Image, und pusht es in das Nexus UnScanned Repository.
+Podman
+
+
+build-maptilerImage-job
+Baut das Maptiler-Image und pusht es in das Nexus UnScanned Repository.
+Podman
+scan-xelos
+scan-xelosImage-job
+Löst den Security-Scan des neu gebauten Xelos-Images über vRA aus.
+Ansible
+scan-maptiler
+scan-maptilerImage-job
+Löst den Security-Scan des neu gebauten Maptiler-Images über vRA aus.
+Ansible
+
+2. Nutzung und Image-Bestellung
+Die Pipeline wird primär über CI/CD-Variablen gesteuert, die bei einem manuellen Pipeline-Start gesetzt werden.
+2.1 Manuelle Auslösung (Bestellvorgang)
+Um ein bestimmtes Image zu bestellen und die Pipeline zu starten, muss die entsprechende Variable mit dem gewünschten Tag vom Standardwert Tag value abweichend gesetzt werden.
+Image-Typ
+CI-Variable
+Wert (Beispiel)
+Beschreibung
+Xelos
+XELOS_IMAGE_TAG
+3.14.2
+Der exakte Tag des Xelos-Basis-Images, das bestellt werden soll.
+Maptiler
+MAPTILER_TRG_IMAGE_TAG
+1.5.0-bwi
+Der gewünschte Tag für das fertige Maptiler-Image.
+Debug
+CI_DEBUG_TRACE
+true
+Schaltet ausführlichere Job-Logs an (optional).
+
+Hinweis: Ein Job wird nur ausgeführt, wenn seine entsprechende Variable einen von Tag value abweichenden Wert hat (Regel-Set if: $VAR != 'Tag value').
+2.2 GitOps-Auslösung (CI-Trigger)
+Die Pipeline startet auch automatisch, wenn Dateien in den folgenden Verzeichnissen geändert werden:
+Xelos-Order: Änderungen in ansible/aria-order/vars/artifacts.yml
+Maptiler-Scan: Änderungen in ansible/aria-scan/vars/artifacts.yml
+Dies dient dazu, Konfigurations- oder Schwellenwertänderungen für die vRA-Abläufe direkt zu testen.
+3. Authentifizierung und Secrets Management
+Die Pipeline nutzt Vault über das OIDC-Token (VAULT_ID_TOKEN) und holt sich alle notwendigen Secrets zur Laufzeit, um die Passwörter nicht direkt in GitLab zu speichern. Dieses Vorgehen gewährleistet die "Zero-Trust"-Authentifizierung.
+3.1 Mehrstufige Authentifizierung
+Ziel
+Credential-Typ
+Jobs betroffen
+Beschreibung
+Harbor Registry (Runner Pull)
+HARBOR_ROBOT_USER, HARBOR_ROBOT_PASSWORD
+ALLE Jobs
+Dient dem Login, damit GitLab Runner das image: (z.B. socn/ansible:2.18.6) aus der nun privaten Harbor Registry pullen können. Dies geschieht durch das Template .harbor_pull_auth.
+Nexus Repositories
+PIPELINE_SA_USER, PIPELINE_SA_PASSWORD
+wait-, build- Jobs
+Dient dem podman login, um Images aus dem gescannten (ScannedRepo) zu ziehen und in das ungescannte (UnScannedRepo) Repository zu pushen.
+vRA (Aria)
+VRA_USERNAME, VRA_PASSWORD
+order-, scan- Jobs
+Dient der Authentifizierung für die Ansible-Playbooks, um die vRA API (Bestellung und Scan-Trigger) aufzurufen.
+
+3.2 Implementierung des Harbor/Nexus Logins (Podman Jobs)
+In Jobs, die sowohl Nexus- als auch Harbor-Auth benötigen (wait-xelosImage-job, build-xelosImage-job, build-maptilerImage-job), werden die Logins im before_script wie folgt nacheinander manuell ausgeführt:
+Harbor Login: podman login ${HARBOR_REGISTRY} ... (stellt sicher, dass alle externen Images, falls doch Podman sie benötigt, gezogen werden können)
+Nexus Login(s): podman login $IntDev_Nexus_ScannedRepo ... und podman login $IntDev_Nexus_UnScannedRepo ... (für die eigentliche Build-Logik)
+Im after_script werden alle Logouts durchgeführt, um die Session zu beenden.
+4. Roadmap für den Zielbetrieb (Zukünftige Schritte)
+Um die Pipeline in einen vollwertigen, sicheren Zielbetrieb zu überführen, sind folgende Schritte empfohlen:
+Phase
+Zielsetzung
+Status in aktueller Pipeline
+Nächste Schritte
+1. Härtung
+Vollständiges Image-Gating implementieren.
+Scan-Trigger sind vorhanden.
+Schritte: Implementierung der Logik im Scan-Job, um bei Scan-Fehlern (z.B. CVE-Kritikalität zu hoch) die Pipeline fehlschlagen zu lassen.
+2. Promotion
+Automatisierte Überführung von scanned Images in das Ziel-/Prod-Repository.
+Images enden im UnScanned Repository.
+Schritte: Erweiterung der Pipeline um eine neue Stage (promote). Dort wird das gescannte Image (nach erfolgreichem Scan-Check) in das endgültige Produktions-Repository verschoben oder getaggt.
+3. Dynamisierung
+Reduzierung von "Hard-Coded" Werten.
+Artifact-Repository-Pfad ist statisch (z.B. i0000041-...).
+Schritte: Parametrisierung des statischen Hostnamens (i0000041-image-repository...) über eine Vault-Variable, um die Umgebung flexibler zu gestalten.
+
+
