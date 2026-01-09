@@ -1,0 +1,42 @@
+# Main Pipeline Orchestration File
+# This file includes and orchestrates all child pipelines
+
+# Include shared variables
+include:
+  - local: 'pipelines/shared/variables.yaml'
+
+stages:
+  - xelos-pipeline
+  - maptiler-pipeline
+
+# Trigger Xelos Image Pipeline
+xelos-image-pipeline:
+  stage: xelos-pipeline
+  trigger:
+    include:
+      - local: 'pipelines/xelos/pipeline.yaml'
+    strategy: depend  # Wait for child pipeline to complete
+  rules:
+    - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
+    - changes:
+        - pipelines/xelos/**/*
+        - ansible/aria-order/vars/artifacts.yml
+        - docker/xelos/**/*
+      when: always
+
+# Trigger Maptiler Image Pipeline
+maptiler-image-pipeline:
+  stage: maptiler-pipeline
+  trigger:
+    include:
+      - local: 'pipelines/maptiler/pipeline.yaml'
+    strategy: depend  # Wait for child pipeline to complete
+  rules:
+    - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
+      when: always
+    - changes:
+        - pipelines/maptiler/**/*
+        - ansible/aria-scan/vars/artifacts.yml
+        - docker/maptiler/**/*
+      when: always

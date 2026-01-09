@@ -1,0 +1,13 @@
+# Shared Configuration for All Pipelines
+# This file contains common variables used across multiple pipelines
+
+variables:
+  # Debugging
+  CI_DEBUG_TRACE: "false"
+
+  # Vault Configuration - JWT-Flow with Vault
+  VAULT_SERVER_URL: ${VAULT_SERVER_URL}
+  VAULT_AUTH_ROLE: ${VAULT_AUTH_ROLE}
+  VAULT_AUTH_PATH: ${VAULT_AUTH_PATH}
+  VAULT_NAMESPACE: ${VAULT_NAMESPACE}
+  VAULT_MOUNT_PATH: "${VAULT_NAMESPACE}-secrets"

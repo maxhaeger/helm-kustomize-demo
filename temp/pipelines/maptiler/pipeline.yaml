@@ -1,0 +1,117 @@
+# Maptiler Image Pipeline
+# This pipeline handles the complete lifecycle for Maptiler images:
+# build -> scan
+
+variables:
+  UBUNTU_SRC_IMAGE_TAG:
+    value: "24.04"
+    description: "Name des Tags vom verwendeten Ubuntu-Image für das Maptiler-Image"
+  MAPTILER_TRG_IMAGE_TAG:
+    value: "Tag value"
+    description: "Name des Tags vom gebauten Maptiler-Image"
+
+stages:
+  - build
+  - scan
+
+build-maptilerImage-job:
+   tags:
+     - sde-common
+   image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/sde-images/podman:v4.9.4
+   stage: build
+   variables:
+     SRC_REPO: $IntDev_Nexus_ScannedRepo
+     SRC_IMG_PATH: "registry-1.docker.io/library"
+     SRC_IMG: ubuntu:${UBUNTU_SRC_IMAGE_TAG}
+     TRG_REPO: $IntDev_Nexus_UnScannedRepo
+     TRG_IMG_PATH: xelos
+     TRG_IMG: maptiler:${MAPTILER_TRG_IMAGE_TAG}
+#    RAW_REPO_URL: https://artifacts.konvoi.ews-cloud.bwi/repository/i0000041a0000002-raw-repository
+#    MAPTILER_BIN: maptiler-server-v4.5.1-62ca322f-e117-4759-9533-ed7a0d7f537b-linux.deb
+   before_script:
+     - echo "pipeline_user:$PIPELINE_SA_USER"
+     - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_ScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+     - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_UnScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+
+   script:
+     - echo "Erzeuge BWI-spezifisches Maptiler-Image"
+     - cd docker/maptiler
+#    - curl -k --output $MAPTILER_BIN $RAW_REPO_URL/$MAPTILER_BIN
+     - mv ../../binaries/maptiler/*.deb .
+     - podman build --tls-verify=false -f Dockerfile -t $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --format docker --build-arg IMG=$SRC_IMG_PATH/$SRC_IMG --build-arg REPO=$SRC_REPO
+         --build-arg HTTP_PROXY=$INET_PROXY
+         --build-arg http_proxy=$INET_PROXY
+         --build-arg HTTPS_PROXY=$INET_PROXY
+         --build-arg https_proxy=$INET_PROXY
+         --build-arg NO_PROXY=""
+     - podman push $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --tls-verify=false
+
+   after_script:
+     - podman logout $IntDev_Nexus_UnScannedRepo
+     - podman logout $IntDev_Nexus_ScannedRepo
+   rules:
+     - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
+       when: always
+
+
+scan-maptilerImage-job:
+  image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/socn/ansible:2.18.6
+  tags:
+    - sde-common
+
+  stage: scan
+
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: ${VAULT_SERVER_URL}
+
+  secrets:
+    SCAN_DEPLOYMENT_ID:
+      vault: gitlab/scan_deployment_id@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    SCAN_DEPLOYMENT_NAME:
+      vault: gitlab/scan_deployment_name@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    SCAN_PROJECT_ID:
+      vault: gitlab/scan_project_id@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    PROJECT_NAMESPACE:
+      vault: gitlab/project_namespace@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_HOSTNAME:
+      vault: gitlab/vra_hostname@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_USERNAME:
+      vault: gitlab/vra_username@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+    VRA_PASSWORD:
+      vault: gitlab/vra_password@${VAULT_MOUNT_PATH}
+      token: ${VAULT_ID_TOKEN}
+      file: false
+
+  script:
+    - export MAPTILER_IMAGE="i0000041-image-repository.artifacts.konvoi.svc.intdev.cloud.bwi.intranet-bw.de/xelos/maptiler:${MAPTILER_TRG_IMAGE_TAG}"
+    - cd ansible
+    - ansible-playbook playbook.yml -t scan -e "new_xelos_image=${MAPTILER_IMAGE}" -e "vra_hostname=${VRA_HOSTNAME}" -e "vra_username=${VRA_USERNAME}" -e "vra_password=${VRA_PASSWORD}" -e "project_namespace=${PROJECT_NAMESPACE}" -e "project_id=${SCAN_PROJECT_ID}" -e "deployment_name=${SCAN_DEPLOYMENT_NAME}" -e "deployment_id=${SCAN_DEPLOYMENT_ID}"
+
+  needs:
+    - build-maptilerImage-job
+
+  rules:
+    - if: $MAPTILER_TRG_IMAGE_TAG != 'Tag value'
+      when: always
+      changes:
+        - ansible/aria-scan/vars/artifacts.yml
+      when: always
