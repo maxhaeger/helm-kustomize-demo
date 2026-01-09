@@ -27,6 +27,7 @@ stages:
   - build
   - scan-xelos
   - scan-maptiler
+  - wait-scan
 
 order-xelosImage-job:
   image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/socn/ansible:2.18.6
@@ -137,6 +138,9 @@ wait-xelosImage-job:
 
   rules:
     - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
+    - changes:
+      - ansible/aria-order/vars/artifacts.yml
       when: always
 
 
@@ -278,6 +282,9 @@ scan-xelosImage-job:
   rules:
     - if: $XELOS_IMAGE_TAG != 'Tag value'
       when: always
+    - changes:
+        - ansible/aria-order/vars/artifacts.yml
+      when: always
 
 
 scan-maptilerImage-job:
@@ -340,4 +347,59 @@ scan-maptilerImage-job:
       when: always
       changes:
         - ansible/aria-scan/vars/artifacts.yml
+      when: always
+
+
+wait-scan-xelosImage-job:
+  image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/sde-images/podman:v4.9.4
+  tags:
+    - sde-common
+  stage: wait-scan
+
+  variables:
+    SRC_REPO: $IntDev_Nexus_ScannedRepo
+    SRC_IMG_BASE: xelos/bwi
+    SRC_MAJOR_VERSION: $XELOS_MAJOR_VERSION
+    SRC_IMG_TAG: $XELOS_IMAGE_TAG
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: ${VAULT_SERVER_URL}
+
+  before_script:
+    - echo "pipeline_user:$PIPELINE_SA_USER"
+    - echo "$PIPELINE_SA_PASSWORD" | podman login $IntDev_Nexus_ScannedRepo -u $PIPELINE_SA_USER --password-stdin --tls-verify=false
+
+  script:
+    - |
+      IMAGE_FULL_REF="${SRC_REPO}/${SRC_IMG_BASE}:V${SRC_MAJOR_VERSION}_${SRC_IMG_TAG}_build_$CI_COMMIT_SHORT_SHA"
+      MAX_WAIT=1800  # 30m
+      SLEEP_INTERVAL=30  # 30s
+      
+      echo "Prüfe auf Image: ${IMAGE_FULL_REF}"
+      
+      ELAPSED=0
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        if podman manifest inspect --tls-verify=false "${IMAGE_FULL_REF}" > /dev/null 2>&1; then
+          echo "SUCCESS: Image Manifest gefunden und validiert - ist nun auf der TC und der IC verfgbar"
+          exit 0
+        fi
+
+        echo "Image noch nicht verfügbar. Warten... ($ELAPSED / $MAX_WAIT seconds)"
+        sleep $SLEEP_INTERVAL
+        ELAPSED=$((ELAPSED + SLEEP_INTERVAL))
+      done
+      
+      echo "TIMEOUT: Image konnte nicht im Nexus gefunden werden innerhalb $MAX_WAIT Sekunden"
+      exit 1
+
+  after_script:
+    - podman logout $IntDev_Nexus_ScannedRepo
+  needs:
+    - scan-xelosImage-job
+
+  rules:
+    - if: $XELOS_IMAGE_TAG != 'Tag value'
+      when: always
+    - changes:
+      - ansible/aria-scanselfbuild/vars/artifacts.yml
       when: always
