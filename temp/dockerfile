@@ -1,0 +1,47 @@
+ARG REPO
+ARG IMG_PATH
+ARG IMG
+
+FROM ${REPO}/${IMG_PATH}/${IMG}
+
+USER 0
+
+COPY backend_map.conf /etc/nginx/xelos/backend_map.conf
+COPY 99-custom-ca.ini /etc/php.d/99-custom-ca.ini
+
+RUN mkdir -p /opt/bwi
+COPY ICapAvScan_BWI.php /opt/bwi/ICapAvScan_BWI.php
+RUN chmod 755 /opt/bwi/ICapAvScan_BWI.php
+
+RUN mkdir -p /tmp/install && mkdir -p /opt/c-icap && cd /tmp/install
+
+RUN mkdir /server/xelos/_log
+RUN chown 10000:10000 /server/xelos/_log
+
+RUN apk --update --no-check-certificate --no-cache add \ 
+  bzip2 \ 
+  bzip2-dev \ 
+  zlib \ 
+  zlib-dev \ 
+  curl \ 
+  tar \ 
+  gcc \ 
+  make \ 
+  g++
+
+RUN curl --silent --location \
+  --remote-name "http://downloads.sourceforge.net/project/c-icap/c-icap/0.6.x/c_icap-0.6.4.tar.gz" 
+RUN tar -xzf c_icap-0.6.4.tar.gz
+RUN pwd
+WORKDIR /server/xelos/c_icap-0.6.4
+RUN pwd
+RUN ls -rtl
+RUN ./configure --quiet --prefix=/opt/c-icap --enable-large-files && make && make install
+RUN chmod +x /opt/c-icap/bin/c-icap-client
+
+COPY Fehlerseiten /server/xelos/wwwroot/static/error
+RUN chown -R 10000:10000 /server/xelos/wwwroot/static
+
+WORKDIR /server/xelos
+
+USER xelos
