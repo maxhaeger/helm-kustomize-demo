@@ -123,3 +123,36 @@ RUN chmod +x /opt/c-icap/bin/c-icap-client
 
 WORKDIR /server/xelos
 USER xelos
+
+---
+
+
+build-xelosImage-job:
+   extends: [.podman_login]
+   tags: ["sde-common"]
+   image: harbor.sde.svc.intdev.cloud.bwi.intranet-bw.de/sde-images/podman:v4.9.4
+   stage: build
+   variables: 
+     SRC_REPO: $IntDev_Nexus_ScannedRepo
+     SRC_IMG_PATH: registry.xelos.net
+     SRC_IMG: bwi/xelos-$XELOS_MAJOR_VERSION:${XELOS_IMAGE_TAG}
+     TRG_REPO: $IntDev_Nexus_UnScannedRepo
+     TRG_IMG_PATH: xelos
+     TRG_IMG: bwi:V${XELOS_MAJOR_VERSION}_${XELOS_IMAGE_TAG}_build_${CI_COMMIT_SHORT_SHA}
+
+   script:
+     - echo "Erzeuge BWI-spezifisches Xelos-Image"
+     - cd docker/xelos
+     - podman build --tls-verify=false -f dockerfile.xelos -t $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --format docker 
+         --build-arg IMG=$SRC_IMG 
+         --build-arg REPO=$SRC_REPO 
+         --build-arg IMG_PATH=$SRC_IMG_PATH
+         --build-arg HTTP_PROXY=$INET_PROXY
+         --build-arg http_proxy=$INET_PROXY
+         --build-arg HTTPS_PROXY=$INET_PROXY
+         --build-arg https_proxy=$INET_PROXY
+         --build-arg NO_PROXY="" 
+     - podman push $TRG_REPO/$TRG_IMG_PATH/$TRG_IMG --tls-verify=false
+
+   needs:
+     - wait-xelosImage-job
