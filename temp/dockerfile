@@ -45,3 +45,81 @@ RUN chown -R 10000:10000 /server/xelos/wwwroot/static
 WORKDIR /server/xelos
 
 USER xelos
+
+
+
+---  
+
+#efactor
+# ============================================
+# Stage 1: Builder - c-icap kompilieren
+# ============================================
+FROM alpine:3.19 AS builder
+
+# Build Dependencies - hier ist apk erlaubt
+RUN apk add --no-cache \
+    bzip2 \
+    bzip2-dev \
+    zlib \
+    zlib-dev \
+    curl \
+    tar \
+    gcc \
+    make \
+    g++
+
+# c-icap Source holen und bauen
+WORKDIR /tmp/build
+RUN curl --silent --location \
+    --remote-name "http://downloads.sourceforge.net/project/c-icap/c-icap/0.6.x/c_icap-0.6.4.tar.gz" && \
+    tar -xzf c_icap-0.6.4.tar.gz
+
+WORKDIR /tmp/build/c_icap-0.6.4
+RUN ./configure --quiet --prefix=/opt/c-icap --enable-large-files && \
+    make && \
+    make install
+
+# Shared Libraries für c-icap-client sammeln
+RUN mkdir -p /runtime-libs && \
+    ldd /opt/c-icap/bin/c-icap-client 2>/dev/null | \
+    grep "=> /" | awk '{print $3}' | \
+    xargs -I {} cp --parents {} /runtime-libs/ 2>/dev/null || true
+
+# ============================================
+# Stage 2: Runtime - gehärtetes Base Image
+# ============================================
+ARG REPO
+ARG IMG_PATH
+ARG IMG
+FROM ${REPO}/${IMG_PATH}/${IMG}
+
+USER 0
+
+# Kompiliertes c-icap aus Builder kopieren
+COPY --from=builder /opt/c-icap /opt/c-icap
+
+# Shared Libraries kopieren (falls nicht im Base Image)
+COPY --from=builder /runtime-libs/ /
+
+# Verzeichnisse anlegen
+RUN mkdir -p /opt/bwi && \
+    mkdir -p /server/xelos/_log && \
+    chown 10000:10000 /server/xelos/_log
+
+# Config Files kopieren
+COPY backend_map.conf /etc/nginx/xelos/backend_map.conf
+COPY 99-custom-ca.ini /etc/php.d/99-custom-ca.ini
+
+# PHP Script kopieren
+COPY ICapAvScan_BWI.php /opt/bwi/ICapAvScan_BWI.php
+RUN chmod 755 /opt/bwi/ICapAvScan_BWI.php
+
+# Fehlerseiten kopieren
+COPY Fehlerseiten /server/xelos/wwwroot/static/error
+RUN chown -R 10000:10000 /server/xelos/wwwroot/static
+
+# c-icap-client ausführbar machen
+RUN chmod +x /opt/c-icap/bin/c-icap-client
+
+WORKDIR /server/xelos
+USER xelos
